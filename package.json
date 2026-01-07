@@ -1,0 +1,46 @@
+{
+  "name": "java-spring-i18n-helper",
+  "displayName": "Java Spring i18n Helper",
+  "description": "Visualize and manage i18n translation keys in Java Spring projects.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:java"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "Java Spring i18n Helper",
+      "properties": {
+        "javaI18n.detectionPatterns": {
+          "type": "array",
+          "default": [],
+          "description": "Custom Regex patterns to detect i18n keys. The pattern must contain capture group 1 for the key. Example: [\"@Message\\\\(\\\"(.*)\\\"\\\\)\"]",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^16.x",
+    "@types/properties-reader": "^2.1.3",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "properties-reader": "^2.3.0"
+  }
+}
