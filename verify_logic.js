@@ -3,7 +3,13 @@
 const vscode = {
     workspace: {
         getConfiguration: (section) => ({
-            get: (key) => []
+            get: (key) => {
+                if (section === 'springI18n') {
+                    if (key === 'keyRegex') return '([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)';
+                    if (key === 'locales') return ['ko', 'en'];
+                }
+                return undefined;
+            }
         })
     },
     Position: class { constructor(line, char) {} },
@@ -14,36 +20,39 @@ const vscode = {
 const propertiesReader = require('properties-reader');
 
 // Logic extraction for testing
-function getPatterns(userPatterns = []) {
-    const defaultPattern = /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g;
-    const patterns = [defaultPattern];
-    for (const p of userPatterns) {
-        try {
-            patterns.push(new RegExp(p, 'g'));
-        } catch (e) {
-            console.error(`Invalid regex pattern: ${p}`, e);
-        }
+function getPattern() {
+    // Mock config logic
+    const rawRegex = '([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)';
+    try {
+        return new RegExp(rawRegex, 'g');
+    } catch (e) {
+        return /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g;
     }
-    return patterns;
 }
 
 function verify() {
     console.log("Starting verification...");
 
     // Test 1: Regex Matching
+    // Note: The new default regex '([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)' does NOT include quotes.
+    // So it will match user.login in: "user.login" -> match "user.login"
+    // It will also match in: user.login (no quotes) -> match "user.login"
+
     const text = 'String msg = "user.login"; String other = "cmm.error.isExistData"; String invalid = "nodot";';
-    const patterns = getPatterns();
+    const pattern = getPattern();
     let matches = [];
 
-    for (const pattern of patterns) {
-        pattern.lastIndex = 0;
-        let match;
-        while ((match = pattern.exec(text)) !== null) {
-            matches.push(match[1]);
-        }
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+        matches.push(match[1] || match[0]);
     }
 
     console.log("Matches found:", matches);
+    // With current regex, it should find user.login and cmm.error.isExistData.
+    // It might also find "nodot" if the regex wasn't strict about dots?
+    // The regex is `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)` -> requires at least one dot.
+
     if (matches.includes("user.login") && matches.includes("cmm.error.isExistData") && !matches.includes("nodot")) {
         console.log("PASS: Default regex logic works.");
     } else {

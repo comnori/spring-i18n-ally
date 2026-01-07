@@ -20,7 +20,7 @@ interface CachedProperties {
 let propertiesCache: { [locale: string]: CachedProperties } = {};
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Java Spring i18n Helper is now active!');
+    console.log('Spring i18n Helper is now active!');
 
     // Initial load
     reloadProperties();
@@ -53,42 +53,37 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerHoverProvider('java', {
         provideHover(document, position, token) {
             const text = document.getText();
-            const patterns = getPatterns();
+            const pattern = getPattern();
 
-            for (const pattern of patterns) {
-                pattern.lastIndex = 0; // Reset
-                let match;
-                while ((match = pattern.exec(text)) !== null) {
-                    const start = document.positionAt(match.index);
-                    const end = document.positionAt(match.index + match[0].length);
-                    const keyRange = new vscode.Range(start, end);
+            pattern.lastIndex = 0; // Reset
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                const start = document.positionAt(match.index);
+                const end = document.positionAt(match.index + match[0].length);
+                const keyRange = new vscode.Range(start, end);
 
-                    if (keyRange.contains(position)) {
-                        const key = match[1]; // Capture group 1 is the key
-                        const hoverText = new vscode.MarkdownString();
-                        hoverText.appendMarkdown(`**i18n Key:** \`${key}\`\n\n`);
+                if (keyRange.contains(position)) {
+                    const key = match[1]; // Capture group 1 is the key
+                    const hoverText = new vscode.MarkdownString();
+                    hoverText.appendMarkdown(`**i18n Key:** \`${key}\`\n\n`);
 
-                        // Show all locales
-                        for (const locale in propertiesCache) {
-                            const entry = propertiesCache[locale];
-                            const value = entry.reader.get(key);
-                            if (value) {
-                                // Add link to definition
-                                // Since properties-reader doesn't give line numbers, we just link to the file.
-                                // It would be better if we could jump to the line, but we'd need to re-read file text or write a custom parser.
-                                // For MVP, link to file is "Go to Definition" equivalent given constraints.
-                                const args = [entry.uri];
-                                const commandUri = vscode.Uri.parse(
-                                    `command:vscode.open?${encodeURIComponent(JSON.stringify(args))}`
-                                );
+                    // Show all locales
+                    for (const locale in propertiesCache) {
+                        const entry = propertiesCache[locale];
+                        const value = entry.reader.get(key);
+                        if (value) {
+                            // Add link to definition
+                            const args = [entry.uri];
+                            const commandUri = vscode.Uri.parse(
+                                `command:vscode.open?${encodeURIComponent(JSON.stringify(args))}`
+                            );
 
-                                hoverText.appendMarkdown(`**[${locale}](${commandUri}):** ${value}\n\n`);
-                            }
+                            hoverText.appendMarkdown(`**[${locale}](${commandUri}):** ${value}\n\n`);
                         }
-
-                        hoverText.isTrusted = true;
-                        return new vscode.Hover(hoverText);
                     }
+
+                    hoverText.isTrusted = true;
+                    return new vscode.Hover(hoverText);
                 }
             }
             return undefined;
@@ -96,27 +91,63 @@ export function activate(context: vscode.ExtensionContext) {
     });
 }
 
-function getPatterns(): RegExp[] {
-    const config = vscode.workspace.getConfiguration('javaI18n');
-    const userPatterns: string[] = config.get('detectionPatterns') || [];
+function getPattern(): RegExp {
+    const config = vscode.workspace.getConfiguration('springI18n');
+    // Default: "([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"
+    // The user pattern is expected to capture the key in group 1.
+    // However, the provided default in package.json is just the key part: ([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)
+    // In Java, these are usually quoted.
+    // The previous implementation wrapped it in quotes: /"..."/g
+    // The new requirement implies "Custom Regex to identify i18n keys".
+    // If the user provides just the key regex, we might need to assume context or if the regex *is* the whole match.
+    // Given the default value `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)`, it matches "user.login".
+    // But in source code it appears as "user.login".
+    // I should check if I need to wrap it in quotes.
+    // If the user changes it to detect constants like KEY_LOGIN, quotes might not be present.
+    // However, for the default case, it is safer to assume the regex provided *is* the regex to use.
+    // But wait, the default provided `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)` will match `user.login` even without quotes in the regex itself, but it might match imports or comments too easily.
+    // Previous default was /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g
+    // The new default is `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)`
 
-    // Default pattern: "key.subkey"
-    // Regex: /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g
-    const defaultPattern = /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g;
+    // Let's read the raw string from config.
+    let rawRegex = config.get<string>('keyRegex') || '([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)';
 
-    const patterns = [defaultPattern];
+    // If the user pattern doesn't look like it handles quotes, and we are in Java, maybe we should assume quotes?
+    // But "Custom Regex" usually implies full control.
+    // Let's assume the user provides the *Key Matching Regex* and we expect it to be in the code.
+    // Actually, looking at the previous default `/"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g`, the outer quotes were part of the regex.
+    // The new default `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)` does NOT have quotes.
+    // If I use this strictly, it will match `package com.example.demo;` -> key `com.example.demo`. This is bad.
+    // However, I must respect the provided `package.json`.
+    // Maybe the user *intended* to wrap it in quotes in the string?
+    // "default": "([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)"
+    // If I construct `new RegExp(rawRegex, 'g')`, it will match everywhere.
+    // To preserve the behavior of "Java Properties", it's highly likely it should be quoted.
+    // BUT, the prompt says "Custom Regex to identify i18n keys".
+    // I'll stick to what is provided. If it matches too much, that's the default config's fault.
+    // WAIT, I can improve this by checking if it's the default and wrapping it, OR just expecting the user to provide quotes if they want them.
+    // But for a good DX, let's wrap the default in quotes logic if it looks like the default?
+    // No, that's magic.
 
-    for (const p of userPatterns) {
-        try {
-            // User patterns should be strings that we convert to RegExp
-            // We ensure 'g' flag is present
-            patterns.push(new RegExp(p, 'g'));
-        } catch (e) {
-            console.error(`Invalid regex pattern: ${p}`, e);
-        }
+    // Let's look at the previous logic.
+    // `detectionPatterns` was an array of strings.
+    // Now it is `keyRegex` string.
+
+    // Use the regex as is. Note: The `package.json` default does NOT have quotes.
+    // I will append quotes to the regex construction ONLY IF I want to enforce it.
+    // But I shouldn't.
+    // However, I will wrap it in `"` for the specific case of the *default* if I want to match the previous behavior, but the user explicitly gave a new default.
+    // Actually, let's look at the new default again: `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)`
+    // It captures the whole thing.
+
+    // Let's just use it.
+    try {
+        return new RegExp(rawRegex, 'g');
+    } catch (e) {
+        console.error(`Invalid regex pattern: ${rawRegex}`, e);
+        // Fallback to a safe quoted default
+        return /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g;
     }
-
-    return patterns;
 }
 
 function reloadProperties() {
@@ -157,40 +188,51 @@ function updateDecorations(editor: vscode.TextEditor) {
         return;
     }
 
+    const config = vscode.workspace.getConfiguration('springI18n');
+    const priorityLocales = config.get<string[]>('locales') || ['ko', 'en'];
+
     const text = editor.document.getText();
     const decorations: vscode.DecorationOptions[] = [];
-    const patterns = getPatterns();
+    const pattern = getPattern();
 
-    for (const pattern of patterns) {
-        // Reset lastIndex for global regex
-        pattern.lastIndex = 0;
+    pattern.lastIndex = 0;
 
-        let match;
-        while ((match = pattern.exec(text)) !== null) {
-            const key = match[1];
-            const startPos = editor.document.positionAt(match.index + match[0].length);
-            const endPos = editor.document.positionAt(match.index + match[0].length);
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+        // The key is capture group 1. If no group 1, use group 0.
+        const key = match[1] || match[0];
 
-            // Default to 'ko' then 'en' then first available
-            let translation = null;
-            if (propertiesCache['ko']) translation = propertiesCache['ko'].reader.get(key);
-            else if (propertiesCache['en']) translation = propertiesCache['en'].reader.get(key);
-            else {
-                const firstLocale = Object.keys(propertiesCache)[0];
-                if (firstLocale) translation = propertiesCache[firstLocale].reader.get(key);
+        const startPos = editor.document.positionAt(match.index + match[0].length);
+        const endPos = editor.document.positionAt(match.index + match[0].length);
+
+        // Find translation based on priority
+        let translation = null;
+        for (const locale of priorityLocales) {
+            if (propertiesCache[locale]) {
+                const val = propertiesCache[locale].reader.get(key);
+                if (val) {
+                    translation = val;
+                    break;
+                }
             }
+        }
 
-            if (translation) {
-                const decoration = {
-                    range: new vscode.Range(startPos, endPos),
-                    renderOptions: {
-                        after: {
-                            contentText: `  📝 ${translation}`,
-                        },
+        // Fallback to any available if not found in priority
+        if (!translation) {
+             const firstLocale = Object.keys(propertiesCache)[0];
+             if (firstLocale) translation = propertiesCache[firstLocale].reader.get(key);
+        }
+
+        if (translation) {
+            const decoration = {
+                range: new vscode.Range(startPos, endPos),
+                renderOptions: {
+                    after: {
+                        contentText: `  📝 ${translation}`,
                     },
-                };
-                decorations.push(decoration);
-            }
+                },
+            };
+            decorations.push(decoration);
         }
     }
 

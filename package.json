@@ -1,38 +1,55 @@
 {
-  "name": "java-spring-i18n-helper",
-  "displayName": "Java Spring i18n Helper",
-  "description": "Visualize and manage i18n translation keys in Java Spring projects.",
+  "name": "spring-i18n-helper",
+  "displayName": "Spring i18n Helper",
+  "publisher": "comnori",
   "version": "0.0.1",
-  "engines": {
-    "vscode": "^1.80.0"
+  "description": "Boost your Spring Boot productivity: Inline i18n previews and hover details for Java properties.",
+  "pricing": "Free",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/comnori/REPO_NAME"
   },
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [
-    "onLanguage:java"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "configuration": {
-      "type": "object",
-      "title": "Java Spring i18n Helper",
-      "properties": {
-        "javaI18n.detectionPatterns": {
-          "type": "array",
-          "default": [],
-          "description": "Custom Regex patterns to detect i18n keys. The pattern must contain capture group 1 for the key. Example: [\"@Message\\\\(\\\"(.*)\\\"\\\\)\"]",
-          "items": {
-            "type": "string"
-          }
-        }
-      }
+  "homepage": "https://github.com/comnori/REPO_NAME",
+  "bugs": {
+    "url": "https://github.com/comnori/REPO_NAME/issues",
+    "email": "comnori@gmail.com"
+  },
+  "maintainers": [
+    {
+      "name": "Yongsik Yun",
+      "email": "comnori@gmail.com",
+      "web": "https://www.linkedin.com/in/yongsik-yun-36260344"
     }
-  },
+  ],
+  "funding": [
+    {
+      "type": "Buy Me a Coffee",
+      "url": "https://www.buymeacoffee.com/comnori"
+    },
+    {
+      "type": "patreon",
+      "url": "https://patreon.com/comnori"
+    }
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --out ./build",
+    "publish": "vsce publish"
+  },
+  "engines": { "vscode": "^1.90.0" },
+  "activationEvents": [ "onLanguage:java" ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Spring i18n Helper",
+      "properties": {
+        "springI18n.locales": { "type": "array", "default": ["ko", "en"], "description": "Prioritized locales to display in inline decorations." },
+        "springI18n.keyRegex": { "type": "string", "default": "([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)", "description": "Custom Regex to identify i18n keys." }
+      }
+    }
   },
   "devDependencies": {
     "@types/node": "^16.x",
