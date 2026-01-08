@@ -26,11 +26,18 @@ export function activate(context: vscode.ExtensionContext) {
     reloadProperties();
 
     // Watch for properties file changes
-    const watcher = vscode.workspace.createFileSystemWatcher('**/message_*.properties');
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.properties');
     watcher.onDidChange(() => reloadProperties());
     watcher.onDidCreate(() => reloadProperties());
     watcher.onDidDelete(() => reloadProperties());
     context.subscriptions.push(watcher);
+
+    // Also watch for application config changes to reload basenames
+    const configWatcher = vscode.workspace.createFileSystemWatcher('**/application.{yml,yaml}');
+    configWatcher.onDidChange(() => reloadProperties());
+    configWatcher.onDidCreate(() => reloadProperties());
+    configWatcher.onDidDelete(() => reloadProperties());
+    context.subscriptions.push(configWatcher);
 
     // Update decorations on activation and editor changes
     if (vscode.window.activeTextEditor) {
@@ -93,94 +100,175 @@ export function activate(context: vscode.ExtensionContext) {
 
 function getPattern(): RegExp {
     const config = vscode.workspace.getConfiguration('springI18n');
-    // Default: "([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"
-    // The user pattern is expected to capture the key in group 1.
-    // However, the provided default in package.json is just the key part: ([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)
-    // In Java, these are usually quoted.
-    // The previous implementation wrapped it in quotes: /"..."/g
-    // The new requirement implies "Custom Regex to identify i18n keys".
-    // If the user provides just the key regex, we might need to assume context or if the regex *is* the whole match.
-    // Given the default value `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)`, it matches "user.login".
-    // But in source code it appears as "user.login".
-    // I should check if I need to wrap it in quotes.
-    // If the user changes it to detect constants like KEY_LOGIN, quotes might not be present.
-    // However, for the default case, it is safer to assume the regex provided *is* the regex to use.
-    // But wait, the default provided `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)` will match `user.login` even without quotes in the regex itself, but it might match imports or comments too easily.
-    // Previous default was /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g
-    // The new default is `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)`
-
-    // Let's read the raw string from config.
     let rawRegex = config.get<string>('keyRegex') || '([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)';
-
-    // If the user pattern doesn't look like it handles quotes, and we are in Java, maybe we should assume quotes?
-    // But "Custom Regex" usually implies full control.
-    // Let's assume the user provides the *Key Matching Regex* and we expect it to be in the code.
-    // Actually, looking at the previous default `/"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g`, the outer quotes were part of the regex.
-    // The new default `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)` does NOT have quotes.
-    // If I use this strictly, it will match `package com.example.demo;` -> key `com.example.demo`. This is bad.
-    // However, I must respect the provided `package.json`.
-    // Maybe the user *intended* to wrap it in quotes in the string?
-    // "default": "([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)"
-    // If I construct `new RegExp(rawRegex, 'g')`, it will match everywhere.
-    // To preserve the behavior of "Java Properties", it's highly likely it should be quoted.
-    // BUT, the prompt says "Custom Regex to identify i18n keys".
-    // I'll stick to what is provided. If it matches too much, that's the default config's fault.
-    // WAIT, I can improve this by checking if it's the default and wrapping it, OR just expecting the user to provide quotes if they want them.
-    // But for a good DX, let's wrap the default in quotes logic if it looks like the default?
-    // No, that's magic.
-
-    // Let's look at the previous logic.
-    // `detectionPatterns` was an array of strings.
-    // Now it is `keyRegex` string.
-
-    // Use the regex as is. Note: The `package.json` default does NOT have quotes.
-    // I will append quotes to the regex construction ONLY IF I want to enforce it.
-    // But I shouldn't.
-    // However, I will wrap it in `"` for the specific case of the *default* if I want to match the previous behavior, but the user explicitly gave a new default.
-    // Actually, let's look at the new default again: `([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)`
-    // It captures the whole thing.
-
-    // Let's just use it.
     try {
         return new RegExp(rawRegex, 'g');
     } catch (e) {
         console.error(`Invalid regex pattern: ${rawRegex}`, e);
-        // Fallback to a safe quoted default
         return /"([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"/g;
     }
 }
 
-function reloadProperties() {
+async function reloadProperties() {
     if (!vscode.workspace.workspaceFolders) return;
 
-    // Find all message_*.properties files
-    vscode.workspace.findFiles('**/message_*.properties').then(files => {
-        propertiesCache = {};
-        files.forEach(file => {
-            const filename = path.basename(file.fsPath);
-            // Extract locale: message_en.properties -> en
-            const match = filename.match(/message_([a-zA-Z_]+)\.properties/);
-            if (match) {
-                const locale = match[1];
-                try {
-                    // properties-reader handles unicode escapes automatically
-                    const props = propertiesReader(file.fsPath);
-                    propertiesCache[locale] = {
-                        reader: props,
-                        uri: file
-                    };
-                    console.log(`Loaded properties for ${locale}`);
-                } catch (e) {
-                    console.error(`Failed to load ${file.fsPath}`, e);
+    // Clear cache to start fresh
+    const newCache: { [locale: string]: CachedProperties } = {};
+    const loadedFiles = new Set<string>();
+
+    // Helper to load file
+    const loadFile = (uri: vscode.Uri) => {
+        if (loadedFiles.has(uri.fsPath)) return;
+
+        const filename = path.basename(uri.fsPath);
+        // Match standard message_*.properties or just *.properties if we can infer locale
+        // Regex: (basename)(_locale)?.properties
+        // But we need to handle "messages.properties" (default) vs "messages_en.properties"
+
+        let locale = 'default';
+        // Try to find locale code (2-3 chars, optional region)
+        // e.g. messages_en.properties, messages_en_US.properties, message_ko.properties
+        const match = filename.match(/_([a-zA-Z]{2,3}(?:_[a-zA-Z]{2})?)\.properties$/);
+        if (match) {
+            locale = match[1];
+        } else if (filename.endsWith('.properties')) {
+            // Check if it is the base file (no underscore locale before extension)
+            // e.g. messages.properties
+            locale = 'default';
+        } else {
+            return; // Not a properties file we recognize
+        }
+
+        try {
+            const props = propertiesReader(uri.fsPath);
+            // If we already have this locale, we append to it (Merge)
+            // But we can only merge if we have a way to merge readers.
+            // properties-reader adds values to the object.
+
+            if (!newCache[locale]) {
+                newCache[locale] = {
+                    reader: props,
+                    uri: uri
+                };
+                console.log(`Loaded properties for ${locale} from ${uri.fsPath}`);
+            } else {
+                 // Append
+                 // properties-reader documentation says: .append(filePath)
+                 // But we have a Reader object.
+                 // We can use newCache[locale].reader.append(uri.fsPath);
+                 newCache[locale].reader.append(uri.fsPath);
+                 console.log(`Merged ${uri.fsPath} into ${locale}`);
+            }
+            loadedFiles.add(uri.fsPath);
+        } catch (e) {
+            console.error(`Failed to load ${uri.fsPath}`, e);
+        }
+    };
+
+    // Strategy 1: src/main/resources/messages*.properties
+    const p1 = await vscode.workspace.findFiles('src/main/resources/messages*.properties');
+    p1.forEach(loadFile);
+
+    // Strategy 2: src/main/resources/**/messages*.properties
+    const p2 = await vscode.workspace.findFiles('src/main/resources/**/messages*.properties');
+    p2.forEach(loadFile);
+
+    // Strategy 3: application.properties / application.yml -> spring.messages.basename
+    const appProps = await vscode.workspace.findFiles('**/application.{properties,yml,yaml}');
+
+    for (const file of appProps) {
+        try {
+            const content = await fs.promises.readFile(file.fsPath, 'utf-8');
+            let basenames: string[] = [];
+
+            // Simple parsing for spring.messages.basename
+            if (file.fsPath.endsWith('.properties')) {
+                const match = content.match(/^spring\.messages\.basename\s*=\s*(.*)$/m);
+                if (match) {
+                    basenames = match[1].split(',').map(s => s.trim());
+                }
+            } else { // YAML
+                // Check flattened first
+                const matchColon = content.match(/^\s*spring\.messages\.basename\s*:\s*(.*)$/m);
+                if (matchColon) {
+                    basenames = matchColon[1].split(',').map(s => s.trim());
+                } else {
+                    // Manual Nested Parsing
+                    // 1. Find "spring:" at root indentation
+                    // 2. Find "messages:" inside spring
+                    // 3. Find "basename:" inside messages
+
+                    const lines = content.split(/\r?\n/);
+                    let inSpring = false;
+                    let springIndent = -1;
+                    let inMessages = false;
+                    let messagesIndent = -1;
+
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine || trimmedLine.startsWith('#')) continue;
+
+                        const indent = line.search(/\S/);
+                        const colonIndex = line.indexOf(':');
+                        if (colonIndex === -1) continue;
+
+                        const key = line.substring(indent, colonIndex).trim();
+                        const value = line.substring(colonIndex + 1).trim();
+
+                        if (key === 'spring') {
+                            inSpring = true;
+                            springIndent = indent;
+                            inMessages = false;
+                        } else if (inSpring && key === 'messages') {
+                             if (indent > springIndent) {
+                                 inMessages = true;
+                                 messagesIndent = indent;
+                             } else {
+                                 // Exited spring block?
+                                 if (indent <= springIndent) inSpring = false;
+                             }
+                        } else if (inMessages && key === 'basename') {
+                            if (indent > messagesIndent) {
+                                basenames = value.split(',').map(s => s.trim());
+                                break; // Found it
+                            } else {
+                                if (indent <= messagesIndent) inMessages = false;
+                                if (indent <= springIndent) inSpring = false;
+                            }
+                        }
+                    }
                 }
             }
-        });
 
-        // Refresh decorations
-        if (vscode.window.activeTextEditor) {
-            updateDecorations(vscode.window.activeTextEditor);
+            for (const basename of basenames) {
+                // basename can be "messages" or "i18n/messages"
+                // It is relative to classpath (src/main/resources)
+                const normalizedBasename = basename.replace(/\./g, '/');
+
+                // Pattern: src/main/resources/normalizedBasename*.properties
+                const pattern = `src/main/resources/${normalizedBasename}*.properties`;
+                const found = await vscode.workspace.findFiles(pattern);
+                found.forEach(loadFile);
+            }
+        } catch (e) {
+            console.error(`Error parsing config file ${file.fsPath}`, e);
         }
-    });
+    }
+
+    // Strategy 4: Existing logic (**/message_*.properties)
+    const p4 = await vscode.workspace.findFiles('**/message_*.properties');
+    p4.forEach(loadFile);
+
+    // Also include default "messages.properties" if missed by p4 (p4 checks message_*)
+    const p5 = await vscode.workspace.findFiles('**/messages*.properties');
+    p5.forEach(loadFile);
+
+    propertiesCache = newCache;
+
+    // Refresh decorations
+    if (vscode.window.activeTextEditor) {
+        updateDecorations(vscode.window.activeTextEditor);
+    }
 }
 
 function updateDecorations(editor: vscode.TextEditor) {
@@ -219,8 +307,15 @@ function updateDecorations(editor: vscode.TextEditor) {
 
         // Fallback to any available if not found in priority
         if (!translation) {
-             const firstLocale = Object.keys(propertiesCache)[0];
-             if (firstLocale) translation = propertiesCache[firstLocale].reader.get(key);
+             // Try 'default' first
+             if (propertiesCache['default']) {
+                 translation = propertiesCache['default'].reader.get(key);
+             }
+
+             if (!translation) {
+                 const firstLocale = Object.keys(propertiesCache)[0];
+                 if (firstLocale) translation = propertiesCache[firstLocale].reader.get(key);
+             }
         }
 
         if (translation) {
