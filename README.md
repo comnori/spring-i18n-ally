@@ -20,6 +20,7 @@ Managing internationalization (i18n) in Java Spring projects can be cumbersome. 
 
 *   ✨ **Inline Preview**: Automatically detects i18n keys in your Java code and displays the translation (e.g., `ko` or `en`) as a subtle inline decoration.
 *   🔍 **Hover Insights**: Hover over any property key to see translations for all configured locales and a quick link to the definition file.
+*   📁 **Smart Property Detection**: Automatically finds property files in `src/main/resources`, nested folders, or custom locations defined in `application.properties`/`yml`.
 *   🚀 **Customizable Regex**: Supports standard dot-separated keys by default, but fully configurable to match your specific project patterns via settings.
 *   ⚡ **Lightweight & Fast**: Built to parse properties files efficiently using robust handling for Unicode escapes.
 
