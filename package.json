@@ -47,7 +47,8 @@
       "title": "Spring i18n Helper",
       "properties": {
         "springI18n.locales": { "type": "array", "default": ["ko", "en"], "description": "Prioritized locales to display in inline decorations." },
-        "springI18n.keyRegex": { "type": "string", "default": "([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)", "description": "Custom Regex to identify i18n keys." }
+        "springI18n.viewLocale": { "type": "string", "default": "", "description": "The specific locale to display in inline decorations." },
+        "springI18n.keyRegex": { "type": "string", "default": "\"([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)\"", "description": "Custom Regex to identify i18n keys." }
       }
     }
   },

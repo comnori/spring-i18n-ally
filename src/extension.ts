@@ -19,11 +19,39 @@ interface CachedProperties {
 }
 let propertiesCache: { [locale: string]: CachedProperties } = {};
 
+let statusBarItem: vscode.StatusBarItem;
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Spring i18n Helper is now active!');
 
+    // Initialize Status Bar Item
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    context.subscriptions.push(statusBarItem);
+
+    // Register Command to Select Locale
+    const selectLocaleCommand = vscode.commands.registerCommand('springI18n.selectLocale', async () => {
+        const config = vscode.workspace.getConfiguration('springI18n');
+        const locales = config.get<string[]>('locales') || [];
+
+        if (locales.length === 0) {
+            vscode.window.showInformationMessage('No locales configured in springI18n.locales');
+            return;
+        }
+
+        const selected = await vscode.window.showQuickPick(['Auto', ...locales], {
+            placeHolder: 'Select a locale to display (Auto = use priority list)'
+        });
+
+        if (selected !== undefined) {
+             const newValue = selected === 'Auto' ? '' : selected;
+             await config.update('viewLocale', newValue, vscode.ConfigurationTarget.Workspace);
+        }
+    });
+    context.subscriptions.push(selectLocaleCommand);
+
     // Initial load
     reloadProperties();
+    updateStatusBar();
 
     // Watch for properties file changes
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.properties');
@@ -38,6 +66,16 @@ export function activate(context: vscode.ExtensionContext) {
     configWatcher.onDidCreate(() => reloadProperties());
     configWatcher.onDidDelete(() => reloadProperties());
     context.subscriptions.push(configWatcher);
+
+    // Watch for configuration changes
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('springI18n.viewLocale') || e.affectsConfiguration('springI18n.locales')) {
+            updateStatusBar();
+            if (vscode.window.activeTextEditor) {
+                updateDecorations(vscode.window.activeTextEditor);
+            }
+        }
+    }));
 
     // Update decorations on activation and editor changes
     if (vscode.window.activeTextEditor) {
@@ -97,6 +135,22 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 }
+
+function updateStatusBar() {
+    const config = vscode.workspace.getConfiguration('springI18n');
+    const viewLocale = config.get<string>('viewLocale');
+
+    if (viewLocale) {
+        statusBarItem.text = `$(globe) ${viewLocale}`;
+        statusBarItem.tooltip = `Showing translations for ${viewLocale}`;
+    } else {
+        statusBarItem.text = `$(globe) Auto`;
+        statusBarItem.tooltip = `Showing translations based on priority list`;
+    }
+    statusBarItem.command = 'springI18n.selectLocale';
+    statusBarItem.show();
+}
+
 
 function getPattern(): RegExp {
     const config = vscode.workspace.getConfiguration('springI18n');
@@ -183,7 +237,7 @@ async function reloadProperties() {
 
             // Simple parsing for spring.messages.basename
             if (file.fsPath.endsWith('.properties')) {
-                const match = content.match(/^spring\.messages\.basename\s*=\s*(.*)$/m);
+                const match = content.match(/^\s*spring\.messages\.basename\s*=\s*(.*)$/m);
                 if (match) {
                     basenames = match[1].split(',').map(s => s.trim());
                 }
@@ -278,6 +332,13 @@ function updateDecorations(editor: vscode.TextEditor) {
 
     const config = vscode.workspace.getConfiguration('springI18n');
     const priorityLocales = config.get<string[]>('locales') || ['ko', 'en'];
+    const viewLocale = config.get<string>('viewLocale');
+
+    // Use viewLocale if set, otherwise use priorityLocales
+    let effectiveLocales = priorityLocales;
+    if (viewLocale) {
+        effectiveLocales = [viewLocale];
+    }
 
     const text = editor.document.getText();
     const decorations: vscode.DecorationOptions[] = [];
@@ -295,7 +356,7 @@ function updateDecorations(editor: vscode.TextEditor) {
 
         // Find translation based on priority
         let translation = null;
-        for (const locale of priorityLocales) {
+        for (const locale of effectiveLocales) {
             if (propertiesCache[locale]) {
                 const val = propertiesCache[locale].reader.get(key);
                 if (val) {
@@ -306,7 +367,9 @@ function updateDecorations(editor: vscode.TextEditor) {
         }
 
         // Fallback to any available if not found in priority
-        if (!translation) {
+        // Only if viewLocale is NOT set (so we are in Auto mode)
+        // If viewLocale IS set, we only show that locale.
+        if (!translation && !viewLocale) {
              // Try 'default' first
              if (propertiesCache['default']) {
                  translation = propertiesCache['default'].reader.get(key);
