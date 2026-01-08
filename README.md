@@ -92,6 +92,10 @@ If you find this extension helpful, please consider supporting the development!
 **Author**: [Yongsik Yun](https://www.linkedin.com/in/yongsik-yun-36260344)
 📧 comnori@gmail.com
 
+## Inspiration
+
+This extension is inspired by [lokalise.i18n-ally](https://github.com/lokalise/i18n-ally).
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

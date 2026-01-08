@@ -40,14 +40,59 @@
     "publish": "vsce publish"
   },
   "engines": { "vscode": "^1.90.0" },
-  "activationEvents": [ "onLanguage:java" ],
+  "activationEvents": [ "onLanguage:java", "onView:springI18nView" ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "spring-i18n-explorer",
+          "title": "Spring i18n",
+          "icon": "$(globe)"
+        }
+      ]
+    },
+    "views": {
+      "spring-i18n-explorer": [
+        {
+          "id": "springI18nView",
+          "name": "Translations"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "springI18n.editKey",
+        "title": "Edit Translation",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "springI18n.extractKey",
+        "title": "Extract to i18n Key"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "springI18n.editKey",
+          "when": "view == springI18nView && viewItem == i18nItem",
+          "group": "inline"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "springI18n.extractKey",
+          "group": "spring-i18n",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
     "configuration": {
       "title": "Spring i18n Helper",
       "properties": {
         "springI18n.locales": { "type": "array", "default": ["ko", "en"], "description": "Prioritized locales to display in inline decorations." },
-        "springI18n.keyRegex": { "type": "string", "default": "([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)", "description": "Custom Regex to identify i18n keys." }
+        "springI18n.viewLocale": { "type": "string", "default": "", "description": "The specific locale to display in inline decorations." },
+        "springI18n.keyRegex": { "type": "string", "default": "\"([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)\"", "description": "Custom Regex to identify i18n keys." }
       }
     }
   },
