@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import propertiesReader = require('properties-reader');
-import * as path from 'path';
-import * as fs from 'fs';
+import { I18nManager } from './i18nManager';
+import { I18nKeyTreeProvider } from './views/I18nKeyTreeProvider';
+import { editI18nKey } from './commands/editKey';
+import { extractI18nKey } from './commands/extractKey';
 
 // Constants
 const DECORATION_TYPE = vscode.window.createTextEditorDecorationType({
@@ -12,17 +13,21 @@ const DECORATION_TYPE = vscode.window.createTextEditorDecorationType({
     }
 });
 
-// Cache for properties
-interface CachedProperties {
-    reader: propertiesReader.Reader;
-    uri: vscode.Uri;
-}
-let propertiesCache: { [locale: string]: CachedProperties } = {};
-
 let statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Spring i18n Helper is now active!');
+
+    // Initialize Manager
+    const manager = I18nManager.getInstance();
+
+    // Register View Provider
+    const treeProvider = new I18nKeyTreeProvider();
+    vscode.window.registerTreeDataProvider('springI18nView', treeProvider);
+
+    // Register Commands
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.editKey', editI18nKey));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.extractKey', extractI18nKey));
 
     // Initialize Status Bar Item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -50,32 +55,40 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(selectLocaleCommand);
 
     // Initial load
-    reloadProperties();
+    manager.reloadProperties();
     updateStatusBar();
 
     // Watch for properties file changes
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.properties');
-    watcher.onDidChange(() => reloadProperties());
-    watcher.onDidCreate(() => reloadProperties());
-    watcher.onDidDelete(() => reloadProperties());
+    watcher.onDidChange(() => manager.reloadProperties());
+    watcher.onDidCreate(() => manager.reloadProperties());
+    watcher.onDidDelete(() => manager.reloadProperties());
     context.subscriptions.push(watcher);
 
     // Also watch for application config changes to reload basenames
     const configWatcher = vscode.workspace.createFileSystemWatcher('**/application.{yml,yaml}');
-    configWatcher.onDidChange(() => reloadProperties());
-    configWatcher.onDidCreate(() => reloadProperties());
-    configWatcher.onDidDelete(() => reloadProperties());
+    configWatcher.onDidChange(() => manager.reloadProperties());
+    configWatcher.onDidCreate(() => manager.reloadProperties());
+    configWatcher.onDidDelete(() => manager.reloadProperties());
     context.subscriptions.push(configWatcher);
 
     // Watch for configuration changes
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('springI18n.viewLocale') || e.affectsConfiguration('springI18n.locales')) {
             updateStatusBar();
+            treeProvider.refresh(); // Refresh view if locale changes
             if (vscode.window.activeTextEditor) {
                 updateDecorations(vscode.window.activeTextEditor);
             }
         }
     }));
+
+    // Listen to Manager changes to refresh decorations
+    manager.onDidChange(() => {
+        if (vscode.window.activeTextEditor) {
+            updateDecorations(vscode.window.activeTextEditor);
+        }
+    });
 
     // Update decorations on activation and editor changes
     if (vscode.window.activeTextEditor) {
@@ -113,18 +126,26 @@ export function activate(context: vscode.ExtensionContext) {
                     hoverText.appendMarkdown(`**i18n Key:** \`${key}\`\n\n`);
 
                     // Show all locales
-                    for (const locale in propertiesCache) {
-                        const entry = propertiesCache[locale];
-                        const value = entry.reader.get(key);
-                        if (value) {
-                            // Add link to definition
-                            const args = [entry.uri];
-                            const commandUri = vscode.Uri.parse(
-                                `command:vscode.open?${encodeURIComponent(JSON.stringify(args))}`
-                            );
-
-                            hoverText.appendMarkdown(`**[${locale}](${commandUri}):** ${value}\n\n`);
-                        }
+                    // We need to iterate over available locales in manager.
+                    // Or iterate over configured locales?
+                    // Let's iterate over ALL locales found in cache.
+                    const manager = I18nManager.getInstance();
+                    for (const locale in manager.propertiesCache) {
+                         const value = manager.getTranslation(key, locale);
+                         if (value) {
+                             // Can we get URI?
+                             const uri = manager.getSourceFile(key, locale);
+                             let localeStr = `**[${locale}]`;
+                             if (uri) {
+                                 const args = [uri];
+                                 const commandUri = vscode.Uri.parse(
+                                     `command:vscode.open?${encodeURIComponent(JSON.stringify(args))}`
+                                 );
+                                 localeStr += `(${commandUri})`;
+                             }
+                             localeStr += `:** ${value}\n\n`;
+                             hoverText.appendMarkdown(localeStr);
+                         }
                     }
 
                     hoverText.isTrusted = true;
@@ -163,168 +184,6 @@ function getPattern(): RegExp {
     }
 }
 
-async function reloadProperties() {
-    if (!vscode.workspace.workspaceFolders) return;
-
-    // Clear cache to start fresh
-    const newCache: { [locale: string]: CachedProperties } = {};
-    const loadedFiles = new Set<string>();
-
-    // Helper to load file
-    const loadFile = (uri: vscode.Uri) => {
-        if (loadedFiles.has(uri.fsPath)) return;
-
-        const filename = path.basename(uri.fsPath);
-        // Match standard message_*.properties or just *.properties if we can infer locale
-        // Regex: (basename)(_locale)?.properties
-        // But we need to handle "messages.properties" (default) vs "messages_en.properties"
-
-        let locale = 'default';
-        // Try to find locale code (2-3 chars, optional region)
-        // e.g. messages_en.properties, messages_en_US.properties, message_ko.properties
-        const match = filename.match(/_([a-zA-Z]{2,3}(?:_[a-zA-Z]{2})?)\.properties$/);
-        if (match) {
-            locale = match[1];
-        } else if (filename.endsWith('.properties')) {
-            // Check if it is the base file (no underscore locale before extension)
-            // e.g. messages.properties
-            locale = 'default';
-        } else {
-            return; // Not a properties file we recognize
-        }
-
-        try {
-            const props = propertiesReader(uri.fsPath);
-            // If we already have this locale, we append to it (Merge)
-            // But we can only merge if we have a way to merge readers.
-            // properties-reader adds values to the object.
-
-            if (!newCache[locale]) {
-                newCache[locale] = {
-                    reader: props,
-                    uri: uri
-                };
-                console.log(`Loaded properties for ${locale} from ${uri.fsPath}`);
-            } else {
-                 // Append
-                 // properties-reader documentation says: .append(filePath)
-                 // But we have a Reader object.
-                 // We can use newCache[locale].reader.append(uri.fsPath);
-                 newCache[locale].reader.append(uri.fsPath);
-                 console.log(`Merged ${uri.fsPath} into ${locale}`);
-            }
-            loadedFiles.add(uri.fsPath);
-        } catch (e) {
-            console.error(`Failed to load ${uri.fsPath}`, e);
-        }
-    };
-
-    // Strategy 1: src/main/resources/messages*.properties
-    const p1 = await vscode.workspace.findFiles('src/main/resources/messages*.properties');
-    p1.forEach(loadFile);
-
-    // Strategy 2: src/main/resources/**/messages*.properties
-    const p2 = await vscode.workspace.findFiles('src/main/resources/**/messages*.properties');
-    p2.forEach(loadFile);
-
-    // Strategy 3: application.properties / application.yml -> spring.messages.basename
-    const appProps = await vscode.workspace.findFiles('**/application.{properties,yml,yaml}');
-
-    for (const file of appProps) {
-        try {
-            const content = await fs.promises.readFile(file.fsPath, 'utf-8');
-            let basenames: string[] = [];
-
-            // Simple parsing for spring.messages.basename
-            if (file.fsPath.endsWith('.properties')) {
-                const match = content.match(/^\s*spring\.messages\.basename\s*=\s*(.*)$/m);
-                if (match) {
-                    basenames = match[1].split(',').map(s => s.trim());
-                }
-            } else { // YAML
-                // Check flattened first
-                const matchColon = content.match(/^\s*spring\.messages\.basename\s*:\s*(.*)$/m);
-                if (matchColon) {
-                    basenames = matchColon[1].split(',').map(s => s.trim());
-                } else {
-                    // Manual Nested Parsing
-                    // 1. Find "spring:" at root indentation
-                    // 2. Find "messages:" inside spring
-                    // 3. Find "basename:" inside messages
-
-                    const lines = content.split(/\r?\n/);
-                    let inSpring = false;
-                    let springIndent = -1;
-                    let inMessages = false;
-                    let messagesIndent = -1;
-
-                    for (const line of lines) {
-                        const trimmedLine = line.trim();
-                        if (!trimmedLine || trimmedLine.startsWith('#')) continue;
-
-                        const indent = line.search(/\S/);
-                        const colonIndex = line.indexOf(':');
-                        if (colonIndex === -1) continue;
-
-                        const key = line.substring(indent, colonIndex).trim();
-                        const value = line.substring(colonIndex + 1).trim();
-
-                        if (key === 'spring') {
-                            inSpring = true;
-                            springIndent = indent;
-                            inMessages = false;
-                        } else if (inSpring && key === 'messages') {
-                             if (indent > springIndent) {
-                                 inMessages = true;
-                                 messagesIndent = indent;
-                             } else {
-                                 // Exited spring block?
-                                 if (indent <= springIndent) inSpring = false;
-                             }
-                        } else if (inMessages && key === 'basename') {
-                            if (indent > messagesIndent) {
-                                basenames = value.split(',').map(s => s.trim());
-                                break; // Found it
-                            } else {
-                                if (indent <= messagesIndent) inMessages = false;
-                                if (indent <= springIndent) inSpring = false;
-                            }
-                        }
-                    }
-                }
-            }
-
-            for (const basename of basenames) {
-                // basename can be "messages" or "i18n/messages"
-                // It is relative to classpath (src/main/resources)
-                const normalizedBasename = basename.replace(/\./g, '/');
-
-                // Pattern: src/main/resources/normalizedBasename*.properties
-                const pattern = `src/main/resources/${normalizedBasename}*.properties`;
-                const found = await vscode.workspace.findFiles(pattern);
-                found.forEach(loadFile);
-            }
-        } catch (e) {
-            console.error(`Error parsing config file ${file.fsPath}`, e);
-        }
-    }
-
-    // Strategy 4: Existing logic (**/message_*.properties)
-    const p4 = await vscode.workspace.findFiles('**/message_*.properties');
-    p4.forEach(loadFile);
-
-    // Also include default "messages.properties" if missed by p4 (p4 checks message_*)
-    const p5 = await vscode.workspace.findFiles('**/messages*.properties');
-    p5.forEach(loadFile);
-
-    propertiesCache = newCache;
-
-    // Refresh decorations
-    if (vscode.window.activeTextEditor) {
-        updateDecorations(vscode.window.activeTextEditor);
-    }
-}
-
 function updateDecorations(editor: vscode.TextEditor) {
     if (editor.document.languageId !== 'java') {
         return;
@@ -340,6 +199,7 @@ function updateDecorations(editor: vscode.TextEditor) {
         effectiveLocales = [viewLocale];
     }
 
+    const manager = I18nManager.getInstance();
     const text = editor.document.getText();
     const decorations: vscode.DecorationOptions[] = [];
     const pattern = getPattern();
@@ -357,27 +217,21 @@ function updateDecorations(editor: vscode.TextEditor) {
         // Find translation based on priority
         let translation = null;
         for (const locale of effectiveLocales) {
-            if (propertiesCache[locale]) {
-                const val = propertiesCache[locale].reader.get(key);
-                if (val) {
-                    translation = val;
-                    break;
-                }
+            const val = manager.getTranslation(key, locale);
+            if (val) {
+                translation = val;
+                break;
             }
         }
 
-        // Fallback to any available if not found in priority
-        // Only if viewLocale is NOT set (so we are in Auto mode)
-        // If viewLocale IS set, we only show that locale.
         if (!translation && !viewLocale) {
              // Try 'default' first
-             if (propertiesCache['default']) {
-                 translation = propertiesCache['default'].reader.get(key);
-             }
+             translation = manager.getTranslation(key, 'default') || null;
 
              if (!translation) {
-                 const firstLocale = Object.keys(propertiesCache)[0];
-                 if (firstLocale) translation = propertiesCache[firstLocale].reader.get(key);
+                 // Try first available
+                 const firstLocale = Object.keys(manager.propertiesCache)[0];
+                 if (firstLocale) translation = manager.getTranslation(key, firstLocale) || null;
              }
         }
 
