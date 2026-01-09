@@ -253,6 +253,182 @@ export class I18nManager {
         console.log('I18n Properties reloaded');
     }
 
+    public async deleteKey(key: string): Promise<void> {
+        // Iterate all locales to find where this key exists
+        const tasks: Promise<void>[] = [];
+
+        for (const locale in this.propertiesCache) {
+             const uri = this.getSourceFile(key, locale);
+             if (uri) {
+                 tasks.push(this.deleteKeyFromFile(uri, key));
+             }
+        }
+        await Promise.all(tasks);
+        // Reload will happen via watcher
+    }
+
+    private async deleteKeyFromFile(uri: vscode.Uri, key: string) {
+         if (uri.fsPath.endsWith('.properties')) {
+            const doc = await vscode.workspace.openTextDocument(uri);
+            const text = doc.getText();
+            const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`^\\s*${escapedKey}\\s*=(.*)$`, 'm');
+            const match = text.match(regex);
+
+            if (match) {
+                 const edit = new vscode.WorkspaceEdit();
+                 const startOffset = match.index!;
+                 let endOffset = match.index! + match[0].length;
+
+                 // Check for multiline value (ending with \)
+                 let currentEnd = endOffset;
+                 while (true) {
+                     const subStr = text.substring(startOffset, currentEnd);
+                     if (subStr.endsWith('\\')) {
+                         // Find next newline
+                         const nextNewline = text.indexOf('\n', currentEnd);
+                         if (nextNewline !== -1) {
+                             currentEnd = nextNewline + 1; // Include newline
+                             // Check line content
+                             const lineEnd = text.indexOf('\n', currentEnd);
+                             const lineContent = text.substring(currentEnd, lineEnd !== -1 ? lineEnd : undefined);
+                             currentEnd = lineEnd !== -1 ? lineEnd + 1 : text.length;
+                             // Continue checking if this line also ends with \
+                             if (!lineContent.trimEnd().endsWith('\\')) {
+                                 endOffset = currentEnd;
+                                 break;
+                             }
+                         } else {
+                             endOffset = text.length;
+                             break;
+                         }
+                     } else {
+                         // Check if we need to include the newline of the matched line
+                         const line = doc.lineAt(doc.positionAt(startOffset));
+                         const lineEndRange = line.rangeIncludingLineBreak.end;
+                         const lineEndOffset = doc.offsetAt(lineEndRange);
+                         if (endOffset < lineEndOffset) {
+                              endOffset = lineEndOffset;
+                         }
+                         break;
+                     }
+                 }
+
+                 const startPos = doc.positionAt(startOffset);
+                 const endPos = doc.positionAt(endOffset);
+
+                 edit.delete(uri, new vscode.Range(startPos, endPos));
+                 await vscode.workspace.applyEdit(edit);
+                 await doc.save();
+            }
+         } else if (uri.fsPath.endsWith('.yml') || uri.fsPath.endsWith('.yaml')) {
+             // Text based deletion for YAML to preserve comments
+             const doc = await vscode.workspace.openTextDocument(uri);
+             const text = doc.getText();
+             const lines = text.split('\n');
+             const parts = key.split('.');
+
+             // Simple heuristic: Find lines that match the structure
+             // This is complex for nested structures without a parser.
+             // Fallback to js-yaml if too complex? No, reviewer blocked it.
+             // Let's implement a recursive line finder.
+
+             let currentLevel = 0;
+             let currentIndent = 0;
+             let lineIndex = 0;
+             let foundLineIndex = -1;
+
+             // We need to match the hierarchy
+             // key: "a.b.c"
+             // a:
+             //   b:
+             //     c: val
+
+             const findKeyLine = (startLine: number, keyParts: string[], indent: number): number => {
+                 if (keyParts.length === 0) return -1;
+                 const currentKey = keyParts[0];
+                 const isLast = keyParts.length === 1;
+
+                 for (let i = startLine; i < lines.length; i++) {
+                     const line = lines[i];
+                     const trimmed = line.trim();
+                     if (!trimmed || trimmed.startsWith('#')) continue;
+
+                     const lineIndent = line.search(/\S/);
+                     if (lineIndent < indent) return -1; // We went out of scope
+                     if (lineIndent > indent) continue; // Skip children of siblings
+
+                     if (lineIndent === indent) {
+                         // Check if key matches
+                         // key: value or key:
+                         if (trimmed.startsWith(currentKey + ':')) {
+                             if (isLast) {
+                                 return i;
+                             } else {
+                                 // Recurse
+                                 return findKeyLine(i + 1, keyParts.slice(1), indent + 1); // Assuming 2 spaces? or just > indent
+                                 // We don't know the exact indentation increment.
+                                 // We should search for the first line with > indent
+                                 // But we need to pass the *actual* indent of the child.
+
+                                 // Find next line with > indent
+                                 let nextIndent = -1;
+                                 for(let j=i+1; j<lines.length; j++) {
+                                     const nextL = lines[j];
+                                     if(nextL.trim() && !nextL.trim().startsWith('#')) {
+                                         const ind = nextL.search(/\S/);
+                                         if (ind > indent) {
+                                             nextIndent = ind;
+                                             break;
+                                         } else {
+                                             return -1; // Empty object?
+                                         }
+                                     }
+                                 }
+                                 if (nextIndent !== -1) {
+                                     return findKeyLine(i + 1, keyParts.slice(1), nextIndent);
+                                 }
+                                 return -1;
+                             }
+                         }
+                     }
+                 }
+                 return -1;
+             };
+
+             const keyStartLine = findKeyLine(0, parts, 0); // Assuming root indent is 0, usually.
+
+             if (keyStartLine !== -1) {
+                 // Found the line. Now determine the range to delete.
+                 // It should include the key line and all nested lines (indented > key line)
+                 const keyIndent = lines[keyStartLine].search(/\S/);
+                 let keyEndLine = keyStartLine;
+
+                 for (let i = keyStartLine + 1; i < lines.length; i++) {
+                     const line = lines[i];
+                     if (!line.trim()) continue; // Include empty lines?
+                     const indent = line.search(/\S/);
+                     if (indent > keyIndent) {
+                         keyEndLine = i;
+                     } else {
+                         break;
+                     }
+                 }
+
+                 // Create range
+                 const startPos = new vscode.Position(keyStartLine, 0);
+                 const endPos = new vscode.Position(keyEndLine + 1, 0); // +1 to delete the line
+
+                 const edit = new vscode.WorkspaceEdit();
+                 edit.delete(uri, new vscode.Range(startPos, endPos));
+                 await vscode.workspace.applyEdit(edit);
+                 await doc.save();
+             } else {
+                 console.warn(`Could not find key ${key} in YAML file for deletion.`);
+             }
+         }
+    }
+
     public async writeTranslation(key: string, locale: string, value: string): Promise<void> {
         let uri = this.getSourceFile(key, locale);
         if (!uri) {
