@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <circle cx="64" cy="64" r="60" fill="#6db33f" />
-  <path d="M64 24 L64 104 M24 64 L104 64" stroke="white" stroke-width="12" />
-  <text x="64" y="80" font-family="Arial" font-size="40" fill="white" text-anchor="middle">i18n</text>
+  <circle cx="64" cy="64" r="64" fill="#6db33f" />
+  <path d="M64 118 C20 70 20 30 64 10 C108 30 108 70 64 118 Z" fill="white" />
+  <text x="64" y="75" font-family="sans-serif" font-weight="bold" font-size="24" fill="#6db33f" text-anchor="middle">A ⇄ 가</text>
 </svg>
