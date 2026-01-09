@@ -2,7 +2,7 @@
   "name": "spring-i18n-helper",
   "displayName": "Spring i18n Helper",
   "publisher": "comnori",
-  "version": "0.0.3",
+  "version": "0.0.5",
   "description": "Boost your Spring Boot productivity: Inline i18n previews and hover details for Java properties.",
   "pricing": "Free",
   "license": "MIT",
@@ -74,12 +74,44 @@
         "command": "springI18n.openTranslationEditor",
         "title": "Open Translation Editor",
         "icon": "$(globe)"
+      },
+      {
+        "command": "springI18n.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "springI18n.deleteKey",
+        "title": "Delete Key",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "springI18n.addKey",
+        "title": "Add Key",
+        "icon": "$(add)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "springI18n.addKey",
+          "when": "view == springI18nView",
+          "group": "navigation"
+        },
+        {
+          "command": "springI18n.refresh",
+          "when": "view == springI18nView",
+          "group": "navigation"
+        }
+      ],
       "view/item/context": [
         {
           "command": "springI18n.openTranslationEditor",
+          "when": "view == springI18nView && viewItem == i18nItem",
+          "group": "inline"
+        },
+        {
+          "command": "springI18n.deleteKey",
           "when": "view == springI18nView && viewItem == i18nItem",
           "group": "inline"
         }

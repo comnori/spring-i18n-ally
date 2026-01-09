@@ -2,7 +2,7 @@
 
 > Boost your Spring Boot productivity: Inline i18n previews and hover details for Java properties.
 
-![Version](https://img.shields.io/badge/version-0.0.3-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.0.5-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Publisher](https://img.shields.io/badge/publisher-comnori-orange?style=flat-square)
 ![Price](https://img.shields.io/badge/price-Free-brightgreen?style=flat-square)
@@ -24,6 +24,7 @@ Managing internationalization (i18n) in Java Spring projects can be cumbersome. 
 *   🚀 **Customizable Regex**: Supports standard dot-separated keys by default, but fully configurable to match your specific project patterns via settings.
 *   ⚡ **Lightweight & Fast**: Built to parse properties files efficiently using robust handling for Unicode escapes.
 *   🌍 **Translation Editor**: Manage translations for multiple locales in a dedicated editor. Includes Google Translate integration to auto-fill missing values.
+*   🌳 **i18n Explorer**: A dedicated Tree View to browse, add, edit, and delete keys easily.
 
 ## Usage
 
@@ -31,8 +32,12 @@ Simply open any `.java` file in your Spring project. The extension will automati
 
 1.  **Open a Java file**: keys like `"com.example.message"` are detected.
 2.  **See the value**: The translation overlays the key text. Select the text to see the original key.
-3.  **Hover for more**: Move your mouse over the key to see all available translations and jump to the definition.
-4.  **Edit Translations**: Open the "Spring i18n" explorer in the Activity Bar, find a key, and use the "Open Translation Editor" command (globe icon) to edit values for all locales.
+3.  **Hover for more**: Move your mouse over the key to see all available translations. **Click the key name** in the hover tooltip to open the Translation Editor.
+4.  **Manage Keys**: Open the "Spring i18n" explorer in the Activity Bar to:
+    *   **Refresh**: Reload properties files.
+    *   **Add Key**: Create a new translation key.
+    *   **Delete Key**: Remove a key and its translations from all files.
+    *   **Edit**: Click a key or use the edit icon to open the full editor.
 
 ![Demo Animation](images/demo.gif)
 
@@ -82,7 +87,8 @@ We are actively working on making this the ultimate i18n tool for Spring. Here i
 
 - [x] **Side Panel (Tree View)**: A dedicated sidebar to browse keys hierarchically (`message` > `error` > `login`) using `vscode.TreeDataProvider`.
 - [x] **Direct Editing (Write-back)**: Modify translations directly from the code or tree view with write-back support to `.properties` files (preserving encoding and structure) and `.yml` files (note: YAML comments are not preserved).
-- [ ] **Key Management**: Add/Remove keys via the UI.
+- [x] **Key Management**: Add/Remove keys via the UI.
+- [ ] **Code Action**: Quick fix to extract a string literal to a property key.
 
 ## Support & Author
 
@@ -105,4 +111,4 @@ This extension is inspired by [lokalise.i18n-ally](https://github.com/lokalise/i
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENSE.md).

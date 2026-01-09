@@ -168,15 +168,22 @@ export class TranslationWebview {
                 .replace(/'/g, "&#039;");
         };
 
+        // Sort locales: mainLocale first, then alphabetical
+        const sortedLocales = [...locales].sort((a, b) => {
+            if (a === mainLocale) return -1;
+            if (b === mainLocale) return 1;
+            return a.localeCompare(b);
+        });
+
         // Simple HTML with table
-        const rows = locales.map(locale => {
+        const rows = sortedLocales.map(locale => {
             const val = escapeHtml(translations[locale] || '');
             const isMain = locale === mainLocale;
             return `
                 <tr>
                     <td>${locale} ${isMain ? '(Main)' : ''}</td>
                     <td>
-                        <input type="text" id="input-${locale}" value="${val}" style="width: 100%;" ${isMain ? 'readonly' : ''} />
+                        <input type="text" id="input-${locale}" value="${val}" style="width: 100%;" />
                     </td>
                     <td>
                         ${!isMain ? `<button onclick="translateOne('${locale}')">Google Translate</button>` : ''}

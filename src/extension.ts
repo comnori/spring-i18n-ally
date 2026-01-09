@@ -32,6 +32,31 @@ export function activate(context: vscode.ExtensionContext) {
         const key = item instanceof I18nItem ? item.keyPath : item;
         TranslationWebview.createOrShow(context.extensionUri, key);
     }));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.refresh', () => {
+        manager.reloadProperties();
+        treeProvider.refresh();
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.addKey', async () => {
+        const key = await vscode.window.showInputBox({
+             placeHolder: 'Enter new i18n key',
+             prompt: 'Key name (e.g. user.login.title)'
+        });
+        if (key) {
+            TranslationWebview.createOrShow(context.extensionUri, key);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.deleteKey', async (item: I18nItem) => {
+        if (!item || !item.keyPath) return;
+        const confirm = await vscode.window.showWarningMessage(
+            `Are you sure you want to delete key '${item.keyPath}'?`,
+            { modal: true },
+            'Delete'
+        );
+        if (confirm === 'Delete') {
+            await manager.deleteKey(item.keyPath);
+            treeProvider.refresh();
+        }
+    }));
 
     // Initialize Status Bar Item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -137,7 +162,11 @@ export function activate(context: vscode.ExtensionContext) {
 
                 if (range.contains(position)) {
                     const hoverText = new vscode.MarkdownString();
-                    hoverText.appendMarkdown(`**i18n Key:** \`${key}\`\n\n`);
+                    const args = [key];
+                    const commandUri = vscode.Uri.parse(
+                        `command:springI18n.openTranslationEditor?${encodeURIComponent(JSON.stringify(args))}`
+                    );
+                    hoverText.appendMarkdown(`**i18n Key:** [\`${key}\`](${commandUri})\n\n`);
 
                     const manager = I18nManager.getInstance();
                     let hasTranslation = false;
