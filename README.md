@@ -2,7 +2,7 @@
 
 > Boost your Spring Boot productivity: Inline i18n previews and hover details for Java properties.
 
-![Version](https://img.shields.io/badge/version-0.0.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.0.3-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Publisher](https://img.shields.io/badge/publisher-comnori-orange?style=flat-square)
 ![Price](https://img.shields.io/badge/price-Free-brightgreen?style=flat-square)
@@ -18,19 +18,21 @@ Managing internationalization (i18n) in Java Spring projects can be cumbersome. 
 
 ## Key Features
 
-*   ✨ **Inline Preview**: Automatically detects i18n keys in your Java code and displays the translation (e.g., `ko` or `en`) as a subtle inline decoration.
+*   ✨ **Inline Preview**: Automatically detects i18n keys in your Java code and overlays the translation directly on the key. Clicking the translation reveals the original key.
 *   🔍 **Hover Insights**: Hover over any property key to see translations for all configured locales and a quick link to the definition file.
 *   📁 **Smart Property Detection**: Automatically finds property files in `src/main/resources`, nested folders, or custom locations defined in `application.properties`/`yml`.
 *   🚀 **Customizable Regex**: Supports standard dot-separated keys by default, but fully configurable to match your specific project patterns via settings.
 *   ⚡ **Lightweight & Fast**: Built to parse properties files efficiently using robust handling for Unicode escapes.
+*   🌍 **Translation Editor**: Manage translations for multiple locales in a dedicated editor. Includes Google Translate integration to auto-fill missing values.
 
 ## Usage
 
 Simply open any `.java` file in your Spring project. The extension will automatically scan for property keys and display the translations.
 
 1.  **Open a Java file**: keys like `"com.example.message"` are detected.
-2.  **See the value**: The translation appears in gray text immediately after the key.
+2.  **See the value**: The translation overlays the key text. Select the text to see the original key.
 3.  **Hover for more**: Move your mouse over the key to see all available translations and jump to the definition.
+4.  **Edit Translations**: Open the "Spring i18n" explorer in the Activity Bar, find a key, and use the "Open Translation Editor" command (globe icon) to edit values for all locales.
 
 ![Demo Animation](images/demo.gif)
 
@@ -41,7 +43,12 @@ This extension contributes the following settings to your VS Code configuration:
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `springI18n.locales` | `array` | `["ko", "en"]` | Prioritized locales to display in inline decorations. |
+| `springI18n.viewLocale` | `string` | `""` | The specific locale to display in inline decorations. |
 | `springI18n.keyRegex` | `string` | `([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)` | Custom Regex to identify i18n keys. |
+
+## Known Issues
+
+*   **Conflict with Red Hat Java Extension**: In some environments, the hover provider might conflict with the standard Java extension (`redhat.java`). If you experience cancellation errors in logs, it is usually harmless. We have optimized our hover provider to minimize interference.
 
 ## For Contributors
 
@@ -73,8 +80,8 @@ npm run publish
 
 We are actively working on making this the ultimate i18n tool for Spring. Here is what's coming next:
 
-- [ ] **Side Panel (Tree View)**: A dedicated sidebar to browse keys hierarchically (`message` > `error` > `login`) using `vscode.TreeDataProvider`.
-- [ ] **Direct Editing (Write-back)**: Modify translations directly from the code or tree view with write-back support to `.properties` files, preserving encoding and structure.
+- [x] **Side Panel (Tree View)**: A dedicated sidebar to browse keys hierarchically (`message` > `error` > `login`) using `vscode.TreeDataProvider`.
+- [x] **Direct Editing (Write-back)**: Modify translations directly from the code or tree view with write-back support to `.properties` files (preserving encoding and structure) and `.yml` files (note: YAML comments are not preserved).
 - [ ] **Key Management**: Add/Remove keys via the UI.
 
 ## Support & Author

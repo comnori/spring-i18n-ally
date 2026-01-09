@@ -1,16 +1,16 @@
 import * as vscode from 'vscode';
 import { I18nManager } from './i18nManager';
-import { I18nKeyTreeProvider } from './views/I18nKeyTreeProvider';
+import { I18nKeyTreeProvider, I18nItem } from './views/I18nKeyTreeProvider';
 import { editI18nKey } from './commands/editKey';
 import { extractI18nKey } from './commands/extractKey';
+import { TranslationWebview } from './views/TranslationWebview';
+import { debounce } from './utils/debounce';
 
 // Constants
 const DECORATION_TYPE = vscode.window.createTextEditorDecorationType({
-    after: {
-        margin: '0 0 0 1em',
-        color: 'gray',
-        fontStyle: 'italic'
-    }
+    textDecoration: 'none; display: inline-block; width: 0;', // Hide original text hack? No.
+    // To hide text, we can use color: transparent.
+    color: 'transparent',
 });
 
 let statusBarItem: vscode.StatusBarItem;
@@ -28,6 +28,10 @@ export function activate(context: vscode.ExtensionContext) {
     // Register Commands
     context.subscriptions.push(vscode.commands.registerCommand('springI18n.editKey', editI18nKey));
     context.subscriptions.push(vscode.commands.registerCommand('springI18n.extractKey', extractI18nKey));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.openTranslationEditor', (item: I18nItem | string) => {
+        const key = item instanceof I18nItem ? item.keyPath : item;
+        TranslationWebview.createOrShow(context.extensionUri, key);
+    }));
 
     // Initialize Status Bar Item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -107,33 +111,38 @@ export function activate(context: vscode.ExtensionContext) {
         }
     }, null, context.subscriptions);
 
+    // Toggle decorations on selection change to reveal/hide key
+    const debouncedUpdate = debounce((editor: vscode.TextEditor) => updateDecorations(editor), 100);
+    vscode.window.onDidChangeTextEditorSelection(event => {
+        if (event.textEditor) {
+            debouncedUpdate(event.textEditor);
+        }
+    }, null, context.subscriptions);
+
     // Hover provider
     vscode.languages.registerHoverProvider('java', {
         provideHover(document, position, token) {
-            const text = document.getText();
+            const lineText = document.lineAt(position.line).text;
             const pattern = getPattern();
+            pattern.lastIndex = 0;
 
-            pattern.lastIndex = 0; // Reset
             let match;
-            while ((match = pattern.exec(text)) !== null) {
-                const start = document.positionAt(match.index);
-                const end = document.positionAt(match.index + match[0].length);
-                const keyRange = new vscode.Range(start, end);
+            while ((match = pattern.exec(lineText)) !== null) {
+                const key = match[1] || match[0];
+                const startChar = match.index;
+                const endChar = match.index + match[0].length;
 
-                if (keyRange.contains(position)) {
-                    const key = match[1]; // Capture group 1 is the key
+                // Adjust range to be relative to the line
+                const range = new vscode.Range(position.line, startChar, position.line, endChar);
+
+                if (range.contains(position)) {
                     const hoverText = new vscode.MarkdownString();
                     hoverText.appendMarkdown(`**i18n Key:** \`${key}\`\n\n`);
 
-                    // Show all locales
-                    // We need to iterate over available locales in manager.
-                    // Or iterate over configured locales?
-                    // Let's iterate over ALL locales found in cache.
                     const manager = I18nManager.getInstance();
                     for (const locale in manager.propertiesCache) {
                          const value = manager.getTranslation(key, locale);
                          if (value) {
-                             // Can we get URI?
                              const uri = manager.getSourceFile(key, locale);
                              let localeStr = `**[${locale}]`;
                              if (uri) {
@@ -208,11 +217,32 @@ function updateDecorations(editor: vscode.TextEditor) {
 
     let match;
     while ((match = pattern.exec(text)) !== null) {
-        // The key is capture group 1. If no group 1, use group 0.
         const key = match[1] || match[0];
+        // The regex matches the quoted string (usually) or just the key depending on regex.
+        // Default regex: "([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)"
+        // match[0] is "user.name"
+        // match[1] is user.name
+        // We want to hide the whole match[0].
 
-        const startPos = editor.document.positionAt(match.index + match[0].length);
+        const startPos = editor.document.positionAt(match.index);
         const endPos = editor.document.positionAt(match.index + match[0].length);
+        const range = new vscode.Range(startPos, endPos);
+
+        // Check if selection intersects
+        // If cursor is on this line (or range), we don't decorate (reveal original)
+        // Or if cursor is INSIDE the range.
+        let isSelected = false;
+        for (const selection of editor.selections) {
+            // If selection intersects the range, reveal
+            if (selection.intersection(range)) {
+                isSelected = true;
+                break;
+            }
+        }
+
+        if (isSelected) {
+            continue;
+        }
 
         // Find translation based on priority
         let translation = null;
@@ -236,13 +266,17 @@ function updateDecorations(editor: vscode.TextEditor) {
         }
 
         if (translation) {
-            const decoration = {
-                range: new vscode.Range(startPos, endPos),
+            const decoration: vscode.DecorationOptions = {
+                range: range,
                 renderOptions: {
-                    after: {
-                        contentText: `  📝 ${translation}`,
-                    },
+                    before: {
+                        contentText: `📝 ${translation}`,
+                        color: 'inherit', // Use default text color for visibility
+                        fontStyle: 'italic',
+                        margin: '0 8px 0 0'
+                    }
                 },
+                hoverMessage: `Original: ${match[0]}`
             };
             decorations.push(decoration);
         }
