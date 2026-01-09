@@ -19,8 +19,8 @@ export class I18nItem extends vscode.TreeItem {
         if (collapsibleState === vscode.TreeItemCollapsibleState.None) {
             this.contextValue = 'i18nItem';
             this.command = {
-                command: 'springI18n.editKey',
-                title: 'Edit Translation',
+                command: 'springI18n.openTranslationEditor',
+                title: 'Open Translation Editor',
                 arguments: [this]
             };
         } else {

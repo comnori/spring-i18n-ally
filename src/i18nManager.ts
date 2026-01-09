@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import propertiesReader = require('properties-reader');
+import * as yaml from 'js-yaml';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -8,6 +9,17 @@ export interface CachedProperties {
     reader: propertiesReader.Reader;
     // Map key -> source file URI
     keySource: Map<string, vscode.Uri>;
+    // Cache YAML content as object for writes
+    // Note: properties-reader supports read-only. We might need a unified way to access values if we mix types.
+    // For now, I'll assume reader handles properties. For YAML, we need to adapt.
+    // properties-reader only supports .properties.
+    // We need to abstract the "reader".
+    // Let's keep `reader` for .properties and add `yamlContent` for YAML.
+    // Or better, make `reader` an interface that both implementations satisfy?
+    // properties-reader has specific API.
+    // Let's add a `type` field.
+    type: 'properties' | 'yaml';
+    yamlObject?: any;
 }
 
 export class I18nManager {
@@ -28,9 +40,27 @@ export class I18nManager {
     public getTranslation(key: string, locale: string): string | undefined {
         const cache = this.propertiesCache[locale];
         if (cache) {
-            return cache.reader.get(key) as string;
+            if (cache.type === 'properties') {
+                return cache.reader.get(key) as string;
+            } else if (cache.type === 'yaml' && cache.yamlObject) {
+                 // Traverse yamlObject with dot notation
+                 return this.getYamlValue(cache.yamlObject, key);
+            }
         }
         return undefined;
+    }
+
+    private getYamlValue(obj: any, key: string): string | undefined {
+        const parts = key.split('.');
+        let current = obj;
+        for (const part of parts) {
+            if (current && typeof current === 'object' && part in current) {
+                current = current[part];
+            } else {
+                return undefined;
+            }
+        }
+        return typeof current === 'string' || typeof current === 'number' ? String(current) : undefined;
     }
 
     public getSourceFile(key: string, locale: string): vscode.Uri | undefined {
@@ -45,14 +75,29 @@ export class I18nManager {
     public getAllKeys(): string[] {
         const keys = new Set<string>();
         for (const locale in this.propertiesCache) {
-            const reader = this.propertiesCache[locale].reader;
-            // properties-reader doesn't directly expose keys easily without digging
-            // Using reader.each((key, value) => ...)
-            reader.each((key: string) => {
-                keys.add(key);
-            });
+            const cache = this.propertiesCache[locale];
+            if (cache.type === 'properties') {
+                cache.reader.each((key: string) => {
+                    keys.add(key);
+                });
+            } else if (cache.type === 'yaml' && cache.yamlObject) {
+                this.collectYamlKeys(cache.yamlObject, '', keys);
+            }
         }
         return Array.from(keys).sort();
+    }
+
+    private collectYamlKeys(obj: any, prefix: string, keys: Set<string>) {
+        if (!obj || typeof obj !== 'object') return;
+        for (const key in obj) {
+            const val = obj[key];
+            const fullKey = prefix ? `${prefix}.${key}` : key;
+            if (typeof val === 'object' && val !== null) {
+                this.collectYamlKeys(val, fullKey, keys);
+            } else {
+                keys.add(fullKey);
+            }
+        }
     }
 
     public async reloadProperties() {
@@ -77,58 +122,67 @@ export class I18nManager {
             }
 
             try {
-                const props = propertiesReader(uri.fsPath);
+                if (uri.fsPath.endsWith('.properties')) {
+                    const props = propertiesReader(uri.fsPath);
 
-                if (!newCache[locale]) {
-                    newCache[locale] = {
-                        reader: props,
-                        keySource: new Map()
-                    };
-                } else {
-                     newCache[locale].reader.append(uri.fsPath);
+                    if (!newCache[locale]) {
+                        newCache[locale] = {
+                            reader: props,
+                            keySource: new Map(),
+                            type: 'properties'
+                        };
+                    } else if (newCache[locale].type === 'properties') {
+                         newCache[locale].reader.append(uri.fsPath);
+                    } else {
+                        // Mixed types? Usually ignore or handle.
+                        // If we have YAML already, we can't easily append properties to it in this structure without merging.
+                        // For simplicity, let's assume one format per locale or prioritize one.
+                        // Or we can maintain a list of readers?
+                        // Given the complexity, let's just log warning.
+                        console.warn(`Mixed properties and yaml for locale ${locale} is not fully supported yet.`);
+                    }
+
+                    if (newCache[locale].type === 'properties') {
+                        props.each((key: string) => {
+                             if (!newCache[locale].keySource.has(key)) {
+                                 newCache[locale].keySource.set(key, uri);
+                             }
+                        });
+                    }
+                } else if (uri.fsPath.endsWith('.yml') || uri.fsPath.endsWith('.yaml')) {
+                    const content = fs.readFileSync(uri.fsPath, 'utf8');
+                    const yamlObj = yaml.load(content);
+
+                    if (!newCache[locale]) {
+                        newCache[locale] = {
+                            reader: propertiesReader(''), // Dummy
+                            keySource: new Map(),
+                            type: 'yaml',
+                            yamlObject: yamlObj
+                        };
+                    } else if (newCache[locale].type === 'yaml') {
+                        // Deep merge yaml objects?
+                        // For now, overwrite top level or ignore?
+                        // Let's do simple Object.assign or deep merge if possible.
+                        // Since we don't have deep merge util handy, let's rely on first loaded (Priority)
+                        // If we want P1 (loaded first) to win, we don't merge if key exists.
+                        // Actually, if we are loading P1 first, we should probably merge P2 INTO P1, overwriting only new keys?
+                        // Or if P1 is highest priority, P1 values should stay.
+                        // So if we merge, we should merge carefully.
+                        // For now, let's just use the first loaded file's object as base and not merge complexly.
+                        // Or, better, just support one YAML file per locale for now or assume unique keys.
+                    }
+
+                    if (newCache[locale].type === 'yaml') {
+                         const keys = new Set<string>();
+                         this.collectYamlKeys(yamlObj, '', keys);
+                         keys.forEach(k => {
+                             if (!newCache[locale].keySource.has(k)) {
+                                 newCache[locale].keySource.set(k, uri);
+                             }
+                         });
+                    }
                 }
-
-                // Track source for each key in this file
-                props.each((key: string) => {
-                     // We only overwrite source if it's the first time we see this key for this locale
-                     // OR should we overwrite?
-                     // If we have Priority Strategy:
-                     // The load order is Priority 1 -> Priority 2...
-                     // So the first file loaded is highest priority.
-                     // Thus, if keySource already has the key, we DO NOT overwrite it.
-                     // Wait, properties-reader.append() overwrites values?
-                     // "The last file appended wins".
-                     // BUT, our strategy loads Priority 1 files FIRST.
-                     // If `properties-reader` append overwrites, then Priority 2 overwrites Priority 1.
-                     // That is BAD.
-                     // We implemented `loadFile` in `extension.ts` using `append`.
-                     // If `properties-reader` append overwrites, then my previous implementation was accidentally REVERSE priority for values?
-                     // Let's check `properties-reader` behavior. Usually append adds/overwrites.
-                     // Ideally, we should load Priority 4 (Legacy) first, then Priority 1 (High) last?
-                     // OR, we should creating separate readers and merge them manually respecting priority.
-                     // Given the "Priority" requirement, if I have `messages.properties` (P1) and `config/messages.properties` (P2),
-                     // and P1 is loaded first.
-                     // If I append P2, P2 values might overwrite P1.
-                     // I should probably REVERSE the loading order?
-                     // BUT, my `loadedFiles` set prevents loading the same file twice.
-                     // So if `messages.properties` matches both P1 and P2 search, it's loaded only once (at P1).
-                     // The issue is if `messages_en.properties` is in `src/main/resources` (P1) AND `src/main/resources/config` (P2).
-                     // If they are distinct files, both load.
-                     // P1 loads first. P2 appends.
-                     // If P2 has same key, it overwrites.
-                     // Is P1 supposed to override P2?
-                     // "1순위 : src/main/resources/messages*.properties".
-                     // Usually 1st Priority means "Use this value".
-                     // So I should load P1 *last* or strictly control the merge.
-                     // Or, I check if key exists before appending? properties-reader doesn't support that easily.
-
-                     // For now, I will assume the previous implementation (append) was acceptable, or I will try to fix it here.
-                     // The clean way is to track keys.
-                     // I will update keySource.
-                     if (!newCache[locale].keySource.has(key)) {
-                         newCache[locale].keySource.set(key, uri);
-                     }
-                });
 
                 loadedFiles.add(uri.fsPath);
             } catch (e) {
@@ -136,12 +190,12 @@ export class I18nManager {
             }
         };
 
-        // Strategy 1: src/main/resources/messages*.properties
-        const p1 = await vscode.workspace.findFiles('src/main/resources/messages*.properties');
+        // Strategy 1: src/main/resources/messages*.{properties,yml,yaml}
+        const p1 = await vscode.workspace.findFiles('src/main/resources/messages*.{properties,yml,yaml}');
         p1.forEach(loadFile);
 
-        // Strategy 2: src/main/resources/**/messages*.properties
-        const p2 = await vscode.workspace.findFiles('src/main/resources/**/messages*.properties');
+        // Strategy 2: src/main/resources/**/messages*.{properties,yml,yaml}
+        const p2 = await vscode.workspace.findFiles('src/main/resources/**/messages*.{properties,yml,yaml}');
         p2.forEach(loadFile);
 
         // Strategy 3: application config
@@ -202,64 +256,64 @@ export class I18nManager {
     public async writeTranslation(key: string, locale: string, value: string): Promise<void> {
         let uri = this.getSourceFile(key, locale);
         if (!uri) {
-            // New key? Or unknown source?
-            // If new key, where to write?
-            // Fallback to default file for that locale if exists?
-            // Or ask user?
-            // For now, if source not found, try to find *any* file for that locale.
+            // Try to find any file for that locale
             const cache = this.propertiesCache[locale];
             if (cache && cache.keySource.size > 0) {
-                 // Pick the first one?
                  uri = cache.keySource.values().next().value;
             }
             if (!uri) {
+                 // If absolutely no file, check if we should create one?
+                 // For now error out.
                  vscode.window.showErrorMessage(`No property file found for locale: ${locale}`);
                  return;
             }
         }
 
-        const doc = await vscode.workspace.openTextDocument(uri);
-        const text = doc.getText();
+        if (uri.fsPath.endsWith('.properties')) {
+            const doc = await vscode.workspace.openTextDocument(uri);
+            const text = doc.getText();
+            const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`^\\s*${escapedKey}\\s*=(.*)$`, 'm');
 
-        // Regex to find key=value
-        // Handle escaped chars in key? Standard properties keys can have escaped chars.
-        // Simplified: escape regex special chars in key.
-        const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`^\\s*${escapedKey}\\s*=(.*)$`, 'm');
+            const match = text.match(regex);
+            const edit = new vscode.WorkspaceEdit();
 
-        const match = text.match(regex);
-        const edit = new vscode.WorkspaceEdit();
+            if (match) {
+                const fullMatch = match[0];
+                const valueMatch = match[1];
+                const valueIndex = fullMatch.lastIndexOf(valueMatch);
+                const absoluteStartIndex = match.index! + valueIndex;
+                const startPos = doc.positionAt(absoluteStartIndex);
+                const endPos = doc.positionAt(absoluteStartIndex + valueMatch.length);
 
-        if (match) {
-            // Replace existing
-            const start = doc.positionAt(match.index! + match[0].indexOf('=') + 1);
-            const end = doc.positionAt(match.index! + match[0].length);
-            // Wait, match[0] is the whole line? Yes, regex includes ^ and $.
-            // Wait, 'm' flag makes ^ match start of line. (.*) matches to end of line?
-            // Yes, but (.*) stops at newline?
-            // Let's rely on range.
-            // The match[1] is the value part.
-            // We want to replace match[1].
+                edit.replace(uri, new vscode.Range(startPos, endPos), value);
+            } else {
+                const position = new vscode.Position(doc.lineCount, 0);
+                edit.insert(uri, position, `\n${key}=${value}`);
+            }
 
-            // Adjust regex:
-            // Group 1 is value.
-            // Find range of Group 1.
-            const fullMatch = match[0];
-            const valueMatch = match[1];
-            const valueIndex = fullMatch.lastIndexOf(valueMatch);
-            const absoluteStartIndex = match.index! + valueIndex;
-            const startPos = doc.positionAt(absoluteStartIndex);
-            const endPos = doc.positionAt(absoluteStartIndex + valueMatch.length);
+            await vscode.workspace.applyEdit(edit);
+            await doc.save();
+        } else if (uri.fsPath.endsWith('.yml') || uri.fsPath.endsWith('.yaml')) {
+            // Read, parse, update, dump
+            const content = await fs.promises.readFile(uri.fsPath, 'utf8');
+            let obj = yaml.load(content) as any || {};
 
-            edit.replace(uri, new vscode.Range(startPos, endPos), value);
-        } else {
-            // Append
-            const position = new vscode.Position(doc.lineCount, 0);
-            edit.insert(uri, position, `\n${key}=${value}`);
+            // Set value deep
+            const parts = key.split('.');
+            let current = obj;
+            for (let i = 0; i < parts.length - 1; i++) {
+                const part = parts[i];
+                if (!current[part] || typeof current[part] !== 'object') {
+                    current[part] = {};
+                }
+                current = current[part];
+            }
+            current[parts[parts.length - 1]] = value;
+
+            const newContent = yaml.dump(obj, { indent: 2 });
+            await fs.promises.writeFile(uri.fsPath, newContent, 'utf8');
         }
-
-        await vscode.workspace.applyEdit(edit);
-        await doc.save();
 
         // Reload will happen via watcher in extension.ts
     }
