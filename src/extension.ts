@@ -140,9 +140,11 @@ export function activate(context: vscode.ExtensionContext) {
                     hoverText.appendMarkdown(`**i18n Key:** \`${key}\`\n\n`);
 
                     const manager = I18nManager.getInstance();
+                    let hasTranslation = false;
                     for (const locale in manager.propertiesCache) {
                          const value = manager.getTranslation(key, locale);
                          if (value) {
+                             hasTranslation = true;
                              const uri = manager.getSourceFile(key, locale);
                              let localeStr = `**[${locale}]`;
                              if (uri) {
@@ -155,6 +157,14 @@ export function activate(context: vscode.ExtensionContext) {
                              localeStr += `:** ${value}\n\n`;
                              hoverText.appendMarkdown(localeStr);
                          }
+                    }
+
+                    if (!hasTranslation) {
+                        const args = [key];
+                        const commandUri = vscode.Uri.parse(
+                            `command:springI18n.openTranslationEditor?${encodeURIComponent(JSON.stringify(args))}`
+                        );
+                        hoverText.appendMarkdown(`[Add Key...](${commandUri})`);
                     }
 
                     hoverText.isTrusted = true;

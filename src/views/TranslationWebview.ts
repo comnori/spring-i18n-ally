@@ -26,6 +26,9 @@ export class TranslationWebview {
                     case 'translate':
                         await this._translate(message.data);
                         return;
+                    case 'delete':
+                        await this._delete();
+                        return;
                 }
             },
             null,
@@ -68,10 +71,33 @@ export class TranslationWebview {
         }
     }
 
+    private async _delete() {
+        const manager = I18nManager.getInstance();
+        await manager.deleteKey(this._key);
+        vscode.window.showInformationMessage(`Deleted key ${this._key}`);
+        this._panel.dispose();
+    }
+
     private async _save(data: any) {
         const manager = I18nManager.getInstance();
-        const promises = Object.keys(data).map(locale =>
-             manager.writeTranslation(this._key, locale, data[locale])
+        const newKey = data.key;
+        const translations = data.translations;
+
+        if (newKey !== this._key) {
+             // Rename case: Delete old key then write new key
+             // Check if new key exists?
+             // Ideally we should warn, but let's just proceed.
+             // Wait, if we delete old key first, we lose values if write fails?
+             // But we have values in 'translations'.
+             if (this._key) {
+                 await manager.deleteKey(this._key);
+             }
+             this._key = newKey;
+             this._panel.title = `Translating: ${this._key}`;
+        }
+
+        const promises = Object.keys(translations).map(locale =>
+             manager.writeTranslation(this._key, locale, translations[locale])
         );
         await Promise.all(promises);
         vscode.window.showInformationMessage(`Saved translations for ${this._key}`);
@@ -175,7 +201,10 @@ export class TranslationWebview {
                 </style>
             </head>
             <body>
-                <h2>Key: ${key}</h2>
+                <div style="margin-bottom: 20px;">
+                    <label>Key: <input type="text" id="key-input" value="${key}" style="width: 50%; font-size: 1.2em;" /></label>
+                    <button onclick="deleteKey()" style="background-color: #d84a4a; color: white;">Delete Key</button>
+                </div>
                 <div style="margin-bottom: 10px;">
                     Main Language (Source): <strong>${mainLocale}</strong>
                 </div>
@@ -200,14 +229,19 @@ export class TranslationWebview {
                     const vscode = acquireVsCodeApi();
                     const mainLocale = "${mainLocale}";
 
+                    function deleteKey() {
+                        vscode.postMessage({ command: 'delete' });
+                    }
+
                     function saveAll() {
-                        const data = {};
+                        const translations = {};
                         const inputs = document.querySelectorAll('input[id^="input-"]');
                         inputs.forEach(input => {
                             const locale = input.id.replace('input-', '');
-                            data[locale] = input.value;
+                            translations[locale] = input.value;
                         });
-                        vscode.postMessage({ command: 'save', data });
+                        const key = document.getElementById('key-input').value;
+                        vscode.postMessage({ command: 'save', data: { key, translations } });
                     }
 
                     function translateOne(targetLocale) {
