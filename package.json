@@ -4,7 +4,7 @@
   "publisher": "comnori",
   "version": "0.0.6",
   "description": "Boost your Spring Boot productivity: Inline i18n previews and hover details for Java properties.",
-  "icon": "resources/logo.svg",
+  "icon": "resources/logo.png",
   "pricing": "Free",
   "license": "MIT",
   "repository": {
