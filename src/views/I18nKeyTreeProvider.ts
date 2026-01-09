@@ -33,12 +33,25 @@ export class I18nKeyTreeProvider implements vscode.TreeDataProvider<I18nItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<I18nItem | undefined | void> = new vscode.EventEmitter<I18nItem | undefined | void>();
     readonly onDidChangeTreeData: vscode.Event<I18nItem | undefined | void> = this._onDidChangeTreeData.event;
 
+    private _filter: string = '';
+    private _defaultCollapsibleState: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
+
     constructor() {
         I18nManager.getInstance().onDidChange(() => this.refresh());
     }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
+    }
+
+    setFilter(filter: string) {
+        this._filter = filter;
+        this.refresh();
+    }
+
+    setCollapsibleState(state: vscode.TreeItemCollapsibleState) {
+        this._defaultCollapsibleState = state;
+        this.refresh();
     }
 
     getTreeItem(element: I18nItem): vscode.TreeItem {
@@ -51,7 +64,13 @@ export class I18nKeyTreeProvider implements vscode.TreeDataProvider<I18nItem> {
         }
 
         const manager = I18nManager.getInstance();
-        const allKeys = manager.getAllKeys(); // sorted array of keys
+        let allKeys = manager.getAllKeys(); // sorted array of keys
+
+        // Filter keys if filter is set
+        if (this._filter) {
+            const lowerFilter = this._filter.toLowerCase();
+            allKeys = allKeys.filter(k => k.toLowerCase().includes(lowerFilter));
+        }
 
         if (element) {
             // Children of a specific group
@@ -94,7 +113,7 @@ export class I18nKeyTreeProvider implements vscode.TreeDataProvider<I18nItem> {
 
             const item = new I18nItem(
                 segment,
-                isLeaf ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
+                isLeaf ? vscode.TreeItemCollapsibleState.None : this._defaultCollapsibleState,
                 fullPath,
                 value
             );

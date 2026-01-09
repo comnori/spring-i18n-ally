@@ -14,7 +14,7 @@ export class TranslationWebview {
         this._extensionUri = extensionUri;
         this._key = key;
 
-        this._update();
+        this.update();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
         this._panel.webview.onDidReceiveMessage(
@@ -44,7 +44,7 @@ export class TranslationWebview {
         if (TranslationWebview.currentPanel) {
             TranslationWebview.currentPanel._panel.reveal(column);
             TranslationWebview.currentPanel._key = key;
-            TranslationWebview.currentPanel._update();
+            TranslationWebview.currentPanel.update();
             return;
         }
 
@@ -101,7 +101,7 @@ export class TranslationWebview {
         );
         await Promise.all(promises);
         vscode.window.showInformationMessage(`Saved translations for ${this._key}`);
-        this._update();
+        this.update();
     }
 
     private async _translate(data: any) {
@@ -137,7 +137,7 @@ export class TranslationWebview {
         }
     }
 
-    private _update() {
+    public update() {
         const manager = I18nManager.getInstance();
         const config = vscode.workspace.getConfiguration('springI18n');
         const locales = config.get<string[]>('locales') || ['en', 'ko'];
@@ -302,5 +302,5 @@ export class TranslationWebview {
                 </script>
             </body>
             </html>`;
-    }
+}
 }

@@ -23,7 +23,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register View Provider
     const treeProvider = new I18nKeyTreeProvider();
-    vscode.window.registerTreeDataProvider('springI18nView', treeProvider);
+    vscode.window.createTreeView('springI18nView', { treeDataProvider: treeProvider });
 
     // Register Commands
     context.subscriptions.push(vscode.commands.registerCommand('springI18n.editKey', editI18nKey));
@@ -44,6 +44,19 @@ export function activate(context: vscode.ExtensionContext) {
         if (key) {
             TranslationWebview.createOrShow(context.extensionUri, key);
         }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.expandAll', () => {
+        treeProvider.setCollapsibleState(vscode.TreeItemCollapsibleState.Expanded);
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.collapseAll', () => {
+        treeProvider.setCollapsibleState(vscode.TreeItemCollapsibleState.Collapsed);
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('springI18n.search', async () => {
+        const filter = await vscode.window.showInputBox({
+            placeHolder: 'Search keys...',
+            prompt: 'Enter search term (empty to clear)'
+        });
+        treeProvider.setFilter(filter || '');
     }));
     context.subscriptions.push(vscode.commands.registerCommand('springI18n.deleteKey', async (item: I18nItem) => {
         if (!item || !item.keyPath) return;
@@ -108,6 +121,9 @@ export function activate(context: vscode.ExtensionContext) {
             treeProvider.refresh(); // Refresh view if locale changes
             if (vscode.window.activeTextEditor) {
                 updateDecorations(vscode.window.activeTextEditor);
+            }
+            if (TranslationWebview.currentPanel) {
+                TranslationWebview.currentPanel.update();
             }
         }
     }));

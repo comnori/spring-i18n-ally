@@ -2,8 +2,9 @@
   "name": "spring-i18n-helper",
   "displayName": "Spring i18n Helper",
   "publisher": "comnori",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Boost your Spring Boot productivity: Inline i18n previews and hover details for Java properties.",
+  "icon": "resources/logo.svg",
   "pricing": "Free",
   "license": "MIT",
   "repository": {
@@ -89,10 +90,40 @@
         "command": "springI18n.addKey",
         "title": "Add Key",
         "icon": "$(add)"
+      },
+      {
+        "command": "springI18n.expandAll",
+        "title": "Expand All",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "springI18n.collapseAll",
+        "title": "Collapse All",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "springI18n.search",
+        "title": "Search Keys",
+        "icon": "$(search)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "springI18n.search",
+          "when": "view == springI18nView",
+          "group": "navigation"
+        },
+        {
+          "command": "springI18n.expandAll",
+          "when": "view == springI18nView",
+          "group": "navigation"
+        },
+        {
+          "command": "springI18n.collapseAll",
+          "when": "view == springI18nView",
+          "group": "navigation"
+        },
         {
           "command": "springI18n.addKey",
           "when": "view == springI18nView",
