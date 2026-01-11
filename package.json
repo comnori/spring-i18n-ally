@@ -2,18 +2,18 @@
   "name": "spring-i18n-helper",
   "displayName": "Spring i18n Helper",
   "publisher": "comnori",
-  "version": "0.0.6",
+  "version": "0.2.1",
   "description": "Boost your Spring Boot productivity: Inline i18n previews and hover details for Java properties.",
   "icon": "resources/logo.png",
   "pricing": "Free",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/comnori/REPO_NAME"
+    "url": "https://github.com/comnori/spring-i18n-ally"
   },
-  "homepage": "https://github.com/comnori/REPO_NAME",
+  "homepage": "https://github.com/comnori/spring-i18n-ally",
   "bugs": {
-    "url": "https://github.com/comnori/REPO_NAME/issues",
+    "url": "https://github.com/comnori/spring-i18n-ally/issues",
     "email": "comnori@gmail.com"
   },
   "maintainers": [
@@ -37,11 +37,15 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package --out ./build",
+    "package": "vsce package",
     "publish": "vsce publish"
   },
-  "engines": { "vscode": "^1.90.0" },
-  "activationEvents": [ "onLanguage:java", "onView:springI18nView" ],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onLanguage:java"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -57,7 +61,9 @@
       "spring-i18n-explorer": [
         {
           "id": "springI18nView",
-          "name": "Translations"
+          "name": "Translations",
+          "icon": "$(globe)",
+          "showCollapseAll": true
         }
       ]
     },
@@ -158,9 +164,24 @@
     "configuration": {
       "title": "Spring i18n Helper",
       "properties": {
-        "springI18n.locales": { "type": "array", "default": ["ko", "en"], "description": "Prioritized locales to display in inline decorations." },
-        "springI18n.viewLocale": { "type": "string", "default": "", "description": "The specific locale to display in inline decorations." },
-        "springI18n.keyRegex": { "type": "string", "default": "\"([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)\"", "description": "Custom Regex to identify i18n keys." }
+        "springI18n.locales": {
+          "type": "array",
+          "default": [
+            "ko",
+            "en"
+          ],
+          "description": "Prioritized locales to display in inline decorations."
+        },
+        "springI18n.viewLocale": {
+          "type": "string",
+          "default": "",
+          "description": "The specific locale to display in inline decorations."
+        },
+        "springI18n.keyRegex": {
+          "type": "string",
+          "default": "\"([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+)\"",
+          "description": "Custom Regex to identify i18n keys."
+        }
       }
     }
   },

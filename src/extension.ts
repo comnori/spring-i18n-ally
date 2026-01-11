@@ -15,8 +15,13 @@ const DECORATION_TYPE = vscode.window.createTextEditorDecorationType({
 
 let statusBarItem: vscode.StatusBarItem;
 
+import { Logger } from './utils/Logger';
+
+// ...
+
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Spring i18n Helper is now active!');
+    Logger.info('Spring i18n Helper is now active!');
+    Logger.show();
 
     // Initialize Manager
     const manager = I18nManager.getInstance();
@@ -38,8 +43,8 @@ export function activate(context: vscode.ExtensionContext) {
     }));
     context.subscriptions.push(vscode.commands.registerCommand('springI18n.addKey', async () => {
         const key = await vscode.window.showInputBox({
-             placeHolder: 'Enter new i18n key',
-             prompt: 'Key name (e.g. user.login.title)'
+            placeHolder: 'Enter new i18n key',
+            prompt: 'Key name (e.g. user.login.title)'
         });
         if (key) {
             TranslationWebview.createOrShow(context.extensionUri, key);
@@ -90,8 +95,8 @@ export function activate(context: vscode.ExtensionContext) {
         });
 
         if (selected !== undefined) {
-             const newValue = selected === 'Auto' ? '' : selected;
-             await config.update('viewLocale', newValue, vscode.ConfigurationTarget.Workspace);
+            const newValue = selected === 'Auto' ? '' : selected;
+            await config.update('viewLocale', newValue, vscode.ConfigurationTarget.Workspace);
         }
     });
     context.subscriptions.push(selectLocaleCommand);
@@ -101,14 +106,14 @@ export function activate(context: vscode.ExtensionContext) {
     updateStatusBar();
 
     // Watch for properties file changes
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*.properties');
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{properties,yml,yaml}');
     watcher.onDidChange(() => manager.reloadProperties());
     watcher.onDidCreate(() => manager.reloadProperties());
     watcher.onDidDelete(() => manager.reloadProperties());
     context.subscriptions.push(watcher);
 
     // Also watch for application config changes to reload basenames
-    const configWatcher = vscode.workspace.createFileSystemWatcher('**/application.{yml,yaml}');
+    const configWatcher = vscode.workspace.createFileSystemWatcher('**/application.{properties,yml,yaml}');
     configWatcher.onDidChange(() => manager.reloadProperties());
     configWatcher.onDidCreate(() => manager.reloadProperties());
     configWatcher.onDidDelete(() => manager.reloadProperties());
@@ -187,21 +192,21 @@ export function activate(context: vscode.ExtensionContext) {
                     const manager = I18nManager.getInstance();
                     let hasTranslation = false;
                     for (const locale in manager.propertiesCache) {
-                         const value = manager.getTranslation(key, locale);
-                         if (value) {
-                             hasTranslation = true;
-                             const uri = manager.getSourceFile(key, locale);
-                             let localeStr = `**[${locale}]`;
-                             if (uri) {
-                                 const args = [uri];
-                                 const commandUri = vscode.Uri.parse(
-                                     `command:vscode.open?${encodeURIComponent(JSON.stringify(args))}`
-                                 );
-                                 localeStr += `(${commandUri})`;
-                             }
-                             localeStr += `:** ${value}\n\n`;
-                             hoverText.appendMarkdown(localeStr);
-                         }
+                        const value = manager.getTranslation(key, locale);
+                        if (value) {
+                            hasTranslation = true;
+                            const uri = manager.getSourceFile(key, locale);
+                            let localeStr = `**[${locale}]`;
+                            if (uri) {
+                                const args = [uri];
+                                const commandUri = vscode.Uri.parse(
+                                    `command:vscode.open?${encodeURIComponent(JSON.stringify(args))}`
+                                );
+                                localeStr += `(${commandUri})`;
+                            }
+                            localeStr += `:** ${value}\n\n`;
+                            hoverText.appendMarkdown(localeStr);
+                        }
                     }
 
                     if (!hasTranslation) {
@@ -310,14 +315,14 @@ function updateDecorations(editor: vscode.TextEditor) {
         }
 
         if (!translation && !viewLocale) {
-             // Try 'default' first
-             translation = manager.getTranslation(key, 'default') || null;
+            // Try 'default' first
+            translation = manager.getTranslation(key, 'default') || null;
 
-             if (!translation) {
-                 // Try first available
-                 const firstLocale = Object.keys(manager.propertiesCache)[0];
-                 if (firstLocale) translation = manager.getTranslation(key, firstLocale) || null;
-             }
+            if (!translation) {
+                // Try first available
+                const firstLocale = Object.keys(manager.propertiesCache)[0];
+                if (firstLocale) translation = manager.getTranslation(key, firstLocale) || null;
+            }
         }
 
         if (translation) {
@@ -340,4 +345,4 @@ function updateDecorations(editor: vscode.TextEditor) {
     editor.setDecorations(DECORATION_TYPE, decorations);
 }
 
-export function deactivate() {}
+export function deactivate() { }

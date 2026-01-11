@@ -6,9 +6,11 @@ export class I18nItem extends vscode.TreeItem {
         public readonly label: string,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly keyPath: string,
-        public readonly value: string = ''
+        public readonly value: string = '',
+        public readonly refreshCounter: number = 0
     ) {
         super(label, collapsibleState);
+        this.id = `${keyPath}-${refreshCounter}`;
         if (value) {
             this.description = value;
             this.tooltip = `${keyPath}: ${value}`;
@@ -35,6 +37,7 @@ export class I18nKeyTreeProvider implements vscode.TreeDataProvider<I18nItem> {
 
     private _filter: string = '';
     private _defaultCollapsibleState: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
+    private _refreshCounter: number = 0;
 
     constructor() {
         I18nManager.getInstance().onDidChange(() => this.refresh());
@@ -51,6 +54,7 @@ export class I18nKeyTreeProvider implements vscode.TreeDataProvider<I18nItem> {
 
     setCollapsibleState(state: vscode.TreeItemCollapsibleState) {
         this._defaultCollapsibleState = state;
+        this._refreshCounter++;
         this.refresh();
     }
 
@@ -115,7 +119,8 @@ export class I18nKeyTreeProvider implements vscode.TreeDataProvider<I18nItem> {
                 segment,
                 isLeaf ? vscode.TreeItemCollapsibleState.None : this._defaultCollapsibleState,
                 fullPath,
-                value
+                value,
+                this._refreshCounter
             );
             children.set(segment, item);
         }

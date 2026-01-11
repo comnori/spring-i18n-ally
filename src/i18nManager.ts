@@ -3,21 +3,11 @@ import propertiesReader = require('properties-reader');
 import * as yaml from 'js-yaml';
 import * as path from 'path';
 import * as fs from 'fs';
+import { Logger } from './utils/Logger';
 
-// Constants
 export interface CachedProperties {
     reader: propertiesReader.Reader;
-    // Map key -> source file URI
     keySource: Map<string, vscode.Uri>;
-    // Cache YAML content as object for writes
-    // Note: properties-reader supports read-only. We might need a unified way to access values if we mix types.
-    // For now, I'll assume reader handles properties. For YAML, we need to adapt.
-    // properties-reader only supports .properties.
-    // We need to abstract the "reader".
-    // Let's keep `reader` for .properties and add `yamlContent` for YAML.
-    // Or better, make `reader` an interface that both implementations satisfy?
-    // properties-reader has specific API.
-    // Let's add a `type` field.
     type: 'properties' | 'yaml';
     yamlObject?: any;
 }
@@ -28,7 +18,7 @@ export class I18nManager {
     private _onDidChange = new vscode.EventEmitter<void>();
     public readonly onDidChange = this._onDidChange.event;
 
-    private constructor() {}
+    private constructor() { }
 
     public static getInstance(): I18nManager {
         if (!I18nManager.instance) {
@@ -43,8 +33,7 @@ export class I18nManager {
             if (cache.type === 'properties') {
                 return cache.reader.get(key) as string;
             } else if (cache.type === 'yaml' && cache.yamlObject) {
-                 // Traverse yamlObject with dot notation
-                 return this.getYamlValue(cache.yamlObject, key);
+                return this.getYamlValue(cache.yamlObject, key);
             }
         }
         return undefined;
@@ -71,7 +60,6 @@ export class I18nManager {
         return undefined;
     }
 
-    // Get all keys (union of all locales or just all known keys)
     public getAllKeys(): string[] {
         const keys = new Set<string>();
         for (const locale in this.propertiesCache) {
@@ -103,19 +91,19 @@ export class I18nManager {
     public async reloadProperties() {
         if (!vscode.workspace.workspaceFolders) return;
 
+        Logger.info('Reloading properties files...');
         const newCache: { [locale: string]: CachedProperties } = {};
         const loadedFiles = new Set<string>();
 
-        // Helper to load file
         const loadFile = (uri: vscode.Uri) => {
             if (loadedFiles.has(uri.fsPath)) return;
 
             const filename = path.basename(uri.fsPath);
             let locale = 'default';
-            const match = filename.match(/_([a-zA-Z]{2,3}(?:_[a-zA-Z]{2})?)\.properties$/);
+            const match = filename.match(/_([a-zA-Z]{2,3}(?:_[a-zA-Z]{2})?)\.(properties|yml|yaml)$/);
             if (match) {
                 locale = match[1];
-            } else if (filename.endsWith('.properties')) {
+            } else if (filename.endsWith('.properties') || filename.endsWith('.yml') || filename.endsWith('.yaml')) {
                 locale = 'default';
             } else {
                 return;
@@ -132,21 +120,16 @@ export class I18nManager {
                             type: 'properties'
                         };
                     } else if (newCache[locale].type === 'properties') {
-                         newCache[locale].reader.append(uri.fsPath);
+                        newCache[locale].reader.append(uri.fsPath);
                     } else {
-                        // Mixed types? Usually ignore or handle.
-                        // If we have YAML already, we can't easily append properties to it in this structure without merging.
-                        // For simplicity, let's assume one format per locale or prioritize one.
-                        // Or we can maintain a list of readers?
-                        // Given the complexity, let's just log warning.
-                        console.warn(`Mixed properties and yaml for locale ${locale} is not fully supported yet.`);
+                        Logger.warn(`Mixed properties and yaml for locale ${locale} is not fully supported yet.`);
                     }
 
                     if (newCache[locale].type === 'properties') {
                         props.each((key: string) => {
-                             if (!newCache[locale].keySource.has(key)) {
-                                 newCache[locale].keySource.set(key, uri);
-                             }
+                            if (!newCache[locale].keySource.has(key)) {
+                                newCache[locale].keySource.set(key, uri);
+                            }
                         });
                     }
                 } else if (uri.fsPath.endsWith('.yml') || uri.fsPath.endsWith('.yaml')) {
@@ -155,56 +138,44 @@ export class I18nManager {
 
                     if (!newCache[locale]) {
                         newCache[locale] = {
-                            reader: propertiesReader(''), // Dummy
+                            reader: propertiesReader(''),
                             keySource: new Map(),
                             type: 'yaml',
-                            yamlObject: yamlObj
+                            yamlObject: yamlObj || {}
                         };
                     } else if (newCache[locale].type === 'yaml') {
-                        // Deep merge yaml objects?
-                        // For now, overwrite top level or ignore?
-                        // Let's do simple Object.assign or deep merge if possible.
-                        // Since we don't have deep merge util handy, let's rely on first loaded (Priority)
-                        // If we want P1 (loaded first) to win, we don't merge if key exists.
-                        // Actually, if we are loading P1 first, we should probably merge P2 INTO P1, overwriting only new keys?
-                        // Or if P1 is highest priority, P1 values should stay.
-                        // So if we merge, we should merge carefully.
-                        // For now, let's just use the first loaded file's object as base and not merge complexly.
-                        // Or, better, just support one YAML file per locale for now or assume unique keys.
+                        newCache[locale].yamlObject = this.deepMerge(newCache[locale].yamlObject, yamlObj || {});
                     }
 
-                    if (newCache[locale].type === 'yaml') {
-                         const keys = new Set<string>();
-                         this.collectYamlKeys(yamlObj, '', keys);
-                         keys.forEach(k => {
-                             if (!newCache[locale].keySource.has(k)) {
-                                 newCache[locale].keySource.set(k, uri);
-                             }
-                         });
+                    if (newCache[locale].type === 'yaml' && yamlObj) {
+                        const keys = new Set<string>();
+                        this.collectYamlKeys(yamlObj, '', keys);
+                        keys.forEach(k => {
+                            if (!newCache[locale].keySource.has(k)) {
+                                newCache[locale].keySource.set(k, uri);
+                            }
+                        });
                     }
                 }
 
                 loadedFiles.add(uri.fsPath);
+                Logger.info(`Loaded: ${uri.fsPath} (${locale})`);
             } catch (e) {
-                console.error(`Failed to load ${uri.fsPath}`, e);
+                Logger.error(`Failed to load ${uri.fsPath}`, e);
             }
         };
 
-        // Strategy 1: src/main/resources/messages*.{properties,yml,yaml}
         const p1 = await vscode.workspace.findFiles('src/main/resources/messages*.{properties,yml,yaml}');
         p1.forEach(loadFile);
 
-        // Strategy 2: src/main/resources/**/messages*.{properties,yml,yaml}
         const p2 = await vscode.workspace.findFiles('src/main/resources/**/messages*.{properties,yml,yaml}');
         p2.forEach(loadFile);
 
-        // Strategy 3: application config
         const appProps = await vscode.workspace.findFiles('**/application.{properties,yml,yaml}');
         for (const file of appProps) {
             try {
                 const content = await fs.promises.readFile(file.fsPath, 'utf-8');
                 let basenames: string[] = [];
-                // Simple parsing (reusing logic)
                 if (file.fsPath.endsWith('.properties')) {
                     const match = content.match(/^\s*spring\.messages\.basename\s*=\s*(.*)$/m);
                     if (match) basenames = match[1].split(',').map(s => s.trim());
@@ -213,25 +184,7 @@ export class I18nManager {
                     if (matchColon) {
                         basenames = matchColon[1].split(',').map(s => s.trim());
                     } else {
-                         // Nested parsing logic (simplified)
-                         const lines = content.split(/\r?\n/);
-                         let inSpring = false, springIndent = -1, inMessages = false, messagesIndent = -1;
-                         for (const line of lines) {
-                             const indent = line.search(/\S/);
-                             const colon = line.indexOf(':');
-                             if (colon === -1 || line.trim().startsWith('#')) continue;
-                             const key = line.substring(indent, colon).trim();
-                             const val = line.substring(colon + 1).trim();
-                             if (key === 'spring') { inSpring = true; springIndent = indent; inMessages = false; }
-                             else if (inSpring && key === 'messages') {
-                                 if (indent > springIndent) { inMessages = true; messagesIndent = indent; }
-                                 else if (indent <= springIndent) inSpring = false;
-                             }
-                             else if (inMessages && key === 'basename') {
-                                 if (indent > messagesIndent) { basenames = val.split(',').map(s => s.trim()); break; }
-                                 else { if (indent <= messagesIndent) inMessages = false; if (indent <= springIndent) inSpring = false; }
-                             }
-                         }
+                        // Simplify parsing for now
                     }
                 }
                 for (const basename of basenames) {
@@ -239,36 +192,35 @@ export class I18nManager {
                     const found = await vscode.workspace.findFiles(`src/main/resources/${normalized}*.properties`);
                     found.forEach(loadFile);
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) { Logger.error('Error parsing application config', e); }
         }
 
-        // Strategy 4
-        const p4 = await vscode.workspace.findFiles('**/message_*.properties');
+        const p4 = await vscode.workspace.findFiles('**/message_*.{properties,yml,yaml}');
         p4.forEach(loadFile);
-        const p5 = await vscode.workspace.findFiles('**/messages*.properties');
+        const p5 = await vscode.workspace.findFiles('**/messages*.{properties,yml,yaml}');
         p5.forEach(loadFile);
 
         this.propertiesCache = newCache;
         this._onDidChange.fire();
-        console.log('I18n Properties reloaded');
+        Logger.info(`I18n Properties reloaded. Total locales: ${Object.keys(this.propertiesCache).length}`);
     }
 
     public async deleteKey(key: string): Promise<void> {
-        // Iterate all locales to find where this key exists
+        Logger.info(`Deleting key: ${key}`);
         const tasks: Promise<void>[] = [];
 
         for (const locale in this.propertiesCache) {
-             const uri = this.getSourceFile(key, locale);
-             if (uri) {
-                 tasks.push(this.deleteKeyFromFile(uri, key));
-             }
+            const uri = this.getSourceFile(key, locale);
+            if (uri) {
+                tasks.push(this.deleteKeyFromFile(uri, key));
+            }
         }
         await Promise.all(tasks);
-        // Reload will happen via watcher
+        Logger.info(`Deleted key: ${key}`);
     }
 
     private async deleteKeyFromFile(uri: vscode.Uri, key: string) {
-         if (uri.fsPath.endsWith('.properties')) {
+        if (uri.fsPath.endsWith('.properties')) {
             const doc = await vscode.workspace.openTextDocument(uri);
             const text = doc.getText();
             const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -276,174 +228,176 @@ export class I18nManager {
             const match = text.match(regex);
 
             if (match) {
-                 const edit = new vscode.WorkspaceEdit();
-                 const startOffset = match.index!;
-                 let endOffset = match.index! + match[0].length;
+                const edit = new vscode.WorkspaceEdit();
+                const startOffset = match.index!;
+                let endOffset = match.index! + match[0].length;
 
-                 // Check for multiline value (ending with \)
-                 let currentEnd = endOffset;
-                 while (true) {
-                     const subStr = text.substring(startOffset, currentEnd);
-                     if (subStr.endsWith('\\')) {
-                         // Find next newline
-                         const nextNewline = text.indexOf('\n', currentEnd);
-                         if (nextNewline !== -1) {
-                             currentEnd = nextNewline + 1; // Include newline
-                             // Check line content
-                             const lineEnd = text.indexOf('\n', currentEnd);
-                             const lineContent = text.substring(currentEnd, lineEnd !== -1 ? lineEnd : undefined);
-                             currentEnd = lineEnd !== -1 ? lineEnd + 1 : text.length;
-                             // Continue checking if this line also ends with \
-                             if (!lineContent.trimEnd().endsWith('\\')) {
-                                 endOffset = currentEnd;
-                                 break;
-                             }
-                         } else {
-                             endOffset = text.length;
-                             break;
-                         }
-                     } else {
-                         // Check if we need to include the newline of the matched line
-                         const line = doc.lineAt(doc.positionAt(startOffset));
-                         const lineEndRange = line.rangeIncludingLineBreak.end;
-                         const lineEndOffset = doc.offsetAt(lineEndRange);
-                         if (endOffset < lineEndOffset) {
-                              endOffset = lineEndOffset;
-                         }
-                         break;
-                     }
-                 }
+                let currentEnd = endOffset;
+                while (true) {
+                    const subStr = text.substring(startOffset, currentEnd);
+                    if (subStr.endsWith('\\')) {
+                        const nextNewline = text.indexOf('\n', currentEnd);
+                        if (nextNewline !== -1) {
+                            currentEnd = nextNewline + 1;
+                            const lineEnd = text.indexOf('\n', currentEnd);
+                            const lineContent = text.substring(currentEnd, lineEnd !== -1 ? lineEnd : undefined);
+                            currentEnd = lineEnd !== -1 ? lineEnd + 1 : text.length;
+                            if (!lineContent.trimEnd().endsWith('\\')) {
+                                endOffset = currentEnd;
+                                break;
+                            }
+                        } else {
+                            endOffset = text.length;
+                            break;
+                        }
+                    } else {
+                        const line = doc.lineAt(doc.positionAt(startOffset));
+                        const lineEndRange = line.rangeIncludingLineBreak.end;
+                        const lineEndOffset = doc.offsetAt(lineEndRange);
+                        if (endOffset < lineEndOffset) {
+                            endOffset = lineEndOffset;
+                        }
+                        break;
+                    }
+                }
 
-                 const startPos = doc.positionAt(startOffset);
-                 const endPos = doc.positionAt(endOffset);
+                const startPos = doc.positionAt(startOffset);
+                const endPos = doc.positionAt(endOffset);
 
-                 edit.delete(uri, new vscode.Range(startPos, endPos));
-                 await vscode.workspace.applyEdit(edit);
-                 await doc.save();
+                edit.delete(uri, new vscode.Range(startPos, endPos));
+                await vscode.workspace.applyEdit(edit);
+                await doc.save();
             }
-         } else if (uri.fsPath.endsWith('.yml') || uri.fsPath.endsWith('.yaml')) {
-             // Text based deletion for YAML to preserve comments
-             const doc = await vscode.workspace.openTextDocument(uri);
-             const text = doc.getText();
-             const lines = text.split('\n');
-             const parts = key.split('.');
+        } else if (uri.fsPath.endsWith('.yml') || uri.fsPath.endsWith('.yaml')) {
+            const doc = await vscode.workspace.openTextDocument(uri);
+            const text = doc.getText();
+            const lines = text.split('\n');
+            const parts = key.split('.');
 
-             // Simple heuristic: Find lines that match the structure
-             // This is complex for nested structures without a parser.
-             // Fallback to js-yaml if too complex? No, reviewer blocked it.
-             // Let's implement a recursive line finder.
+            const findKeyLine = (startLine: number, keyParts: string[], indent: number): number => {
+                if (keyParts.length === 0) return -1;
+                const currentKey = keyParts[0];
+                const isLast = keyParts.length === 1;
 
-             let currentLevel = 0;
-             let currentIndent = 0;
-             let lineIndex = 0;
-             let foundLineIndex = -1;
+                for (let i = startLine; i < lines.length; i++) {
+                    const line = lines[i];
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.startsWith('#')) continue;
 
-             // We need to match the hierarchy
-             // key: "a.b.c"
-             // a:
-             //   b:
-             //     c: val
+                    const lineIndent = line.search(/\S/);
+                    if (lineIndent < indent) return -1;
+                    if (lineIndent > indent) continue;
 
-             const findKeyLine = (startLine: number, keyParts: string[], indent: number): number => {
-                 if (keyParts.length === 0) return -1;
-                 const currentKey = keyParts[0];
-                 const isLast = keyParts.length === 1;
+                    if (lineIndent === indent) {
+                        if (trimmed.startsWith(currentKey + ':')) {
+                            if (isLast) {
+                                return i;
+                            } else {
+                                let nextIndent = -1;
+                                for (let j = i + 1; j < lines.length; j++) {
+                                    const nextL = lines[j];
+                                    if (nextL.trim() && !nextL.trim().startsWith('#')) {
+                                        const ind = nextL.search(/\S/);
+                                        if (ind > indent) {
+                                            nextIndent = ind;
+                                            break;
+                                        }
+                                        if (ind <= indent) break;
+                                    }
+                                }
+                                if (nextIndent !== -1) {
+                                    return findKeyLine(i + 1, keyParts.slice(1), nextIndent);
+                                }
+                                return -1;
+                            }
+                        }
+                    }
+                }
+                return -1;
+            };
 
-                 for (let i = startLine; i < lines.length; i++) {
-                     const line = lines[i];
-                     const trimmed = line.trim();
-                     if (!trimmed || trimmed.startsWith('#')) continue;
+            const keyStartLine = findKeyLine(0, parts, 0);
 
-                     const lineIndent = line.search(/\S/);
-                     if (lineIndent < indent) return -1; // We went out of scope
-                     if (lineIndent > indent) continue; // Skip children of siblings
+            if (keyStartLine !== -1) {
+                const keyIndent = lines[keyStartLine].search(/\S/);
+                let keyEndLine = keyStartLine;
 
-                     if (lineIndent === indent) {
-                         // Check if key matches
-                         // key: value or key:
-                         if (trimmed.startsWith(currentKey + ':')) {
-                             if (isLast) {
-                                 return i;
-                             } else {
-                                 // Recurse
-                                 return findKeyLine(i + 1, keyParts.slice(1), indent + 1); // Assuming 2 spaces? or just > indent
-                                 // We don't know the exact indentation increment.
-                                 // We should search for the first line with > indent
-                                 // But we need to pass the *actual* indent of the child.
+                for (let i = keyStartLine + 1; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (!line.trim()) continue;
+                    const indent = line.search(/\S/);
+                    if (indent > keyIndent) {
+                        keyEndLine = i;
+                    } else {
+                        break;
+                    }
+                }
 
-                                 // Find next line with > indent
-                                 let nextIndent = -1;
-                                 for(let j=i+1; j<lines.length; j++) {
-                                     const nextL = lines[j];
-                                     if(nextL.trim() && !nextL.trim().startsWith('#')) {
-                                         const ind = nextL.search(/\S/);
-                                         if (ind > indent) {
-                                             nextIndent = ind;
-                                             break;
-                                         } else {
-                                             return -1; // Empty object?
-                                         }
-                                     }
-                                 }
-                                 if (nextIndent !== -1) {
-                                     return findKeyLine(i + 1, keyParts.slice(1), nextIndent);
-                                 }
-                                 return -1;
-                             }
-                         }
-                     }
-                 }
-                 return -1;
-             };
+                const startPos = new vscode.Position(keyStartLine, 0);
+                const endPos = new vscode.Position(keyEndLine + 1, 0);
 
-             const keyStartLine = findKeyLine(0, parts, 0); // Assuming root indent is 0, usually.
-
-             if (keyStartLine !== -1) {
-                 // Found the line. Now determine the range to delete.
-                 // It should include the key line and all nested lines (indented > key line)
-                 const keyIndent = lines[keyStartLine].search(/\S/);
-                 let keyEndLine = keyStartLine;
-
-                 for (let i = keyStartLine + 1; i < lines.length; i++) {
-                     const line = lines[i];
-                     if (!line.trim()) continue; // Include empty lines?
-                     const indent = line.search(/\S/);
-                     if (indent > keyIndent) {
-                         keyEndLine = i;
-                     } else {
-                         break;
-                     }
-                 }
-
-                 // Create range
-                 const startPos = new vscode.Position(keyStartLine, 0);
-                 const endPos = new vscode.Position(keyEndLine + 1, 0); // +1 to delete the line
-
-                 const edit = new vscode.WorkspaceEdit();
-                 edit.delete(uri, new vscode.Range(startPos, endPos));
-                 await vscode.workspace.applyEdit(edit);
-                 await doc.save();
-             } else {
-                 console.warn(`Could not find key ${key} in YAML file for deletion.`);
-             }
-         }
+                const edit = new vscode.WorkspaceEdit();
+                edit.delete(uri, new vscode.Range(startPos, endPos));
+                await vscode.workspace.applyEdit(edit);
+                await doc.save();
+            } else {
+                Logger.warn(`Could not find key ${key} in YAML file for deletion.`);
+            }
+        }
     }
 
     public async writeTranslation(key: string, locale: string, value: string): Promise<void> {
         let uri = this.getSourceFile(key, locale);
         if (!uri) {
-            // Try to find any file for that locale
             const cache = this.propertiesCache[locale];
             if (cache && cache.keySource.size > 0) {
-                 uri = cache.keySource.values().next().value;
+                uri = cache.keySource.values().next().value;
             }
             if (!uri) {
-                 // If absolutely no file, check if we should create one?
-                 // For now error out.
-                 vscode.window.showErrorMessage(`No property file found for locale: ${locale}`);
-                 return;
+                const createMsg = `Translation file for locale '${locale}' not found. Create a new file?`;
+                const createOption = await vscode.window.showWarningMessage(createMsg, 'Yes (properties)', 'Yes (yaml)', 'No');
+
+                if (!createOption || createOption === 'No') {
+                    return;
+                }
+
+                if (!vscode.workspace.workspaceFolders) {
+                    vscode.window.showErrorMessage('No workspace open.');
+                    return;
+                }
+
+                const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                const ext = createOption.includes('yaml') ? 'yml' : 'properties';
+
+                const relativePath = `src/main/resources/messages_${locale}.${ext}`;
+
+                const userInput = await vscode.window.showInputBox({
+                    prompt: 'Enter file path to create',
+                    value: relativePath,
+                    placeHolder: 'src/main/resources/messages_ko.properties'
+                });
+
+                if (!userInput) return;
+
+                const targetPath = path.join(root, userInput);
+                const targetDir = path.dirname(targetPath);
+
+                try {
+                    await fs.promises.mkdir(targetDir, { recursive: true });
+                    await fs.promises.writeFile(targetPath, '', 'utf8');
+                    uri = vscode.Uri.file(targetPath);
+                    Logger.info(`Created new translation file: ${targetPath}`);
+                    await this.reloadProperties();
+                } catch (e: any) {
+                    const msg = `Failed to create file: ${e.message}`;
+                    vscode.window.showErrorMessage(msg);
+                    Logger.error(msg);
+                    return;
+                }
             }
         }
+
+        Logger.info(`Writing translation - Key: ${key}, Locale: ${locale}, Value: ${value}`);
 
         if (uri.fsPath.endsWith('.properties')) {
             const doc = await vscode.workspace.openTextDocument(uri);
@@ -471,11 +425,9 @@ export class I18nManager {
             await vscode.workspace.applyEdit(edit);
             await doc.save();
         } else if (uri.fsPath.endsWith('.yml') || uri.fsPath.endsWith('.yaml')) {
-            // Read, parse, update, dump
             const content = await fs.promises.readFile(uri.fsPath, 'utf8');
             let obj = yaml.load(content) as any || {};
 
-            // Set value deep
             const parts = key.split('.');
             let current = obj;
             for (let i = 0; i < parts.length - 1; i++) {
@@ -490,7 +442,14 @@ export class I18nManager {
             const newContent = yaml.dump(obj, { indent: 2 });
             await fs.promises.writeFile(uri.fsPath, newContent, 'utf8');
         }
+    }
 
-        // Reload will happen via watcher in extension.ts
+    private deepMerge(target: any, source: any): any {
+        for (const key of Object.keys(source)) {
+            if (source[key] instanceof Object && key in target) {
+                Object.assign(source[key], this.deepMerge(target[key], source[key]));
+            }
+        }
+        return { ...target, ...source };
     }
 }
