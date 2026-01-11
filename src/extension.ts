@@ -12,7 +12,7 @@ import { I18nHoverProvider } from './services/I18nHoverProvider';
 let statusBarItem: vscode.StatusBarItem;
 
 export async function activate(context: vscode.ExtensionContext) {
-    Logger.info('Spring i18n Helper is starting...');
+    Logger.info('Spring i18n Ally is starting...');
     Logger.show();
 
     // Initialize Manager
@@ -162,7 +162,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // Register Hover Provider
     context.subscriptions.push(vscode.languages.registerHoverProvider('java', new I18nHoverProvider()));
 
-    Logger.info('Spring i18n Helper is now active!');
+    Logger.info('Spring i18n Ally is now active!');
 }
 
 function updateStatusBar() {

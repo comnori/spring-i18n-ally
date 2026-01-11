@@ -159,7 +159,7 @@
       ]
     },
     "configuration": {
-      "title": "Spring i18n Helper",
+      "title": "Spring i18n Ally",
       "properties": {
         "springI18n.locales": {
           "type": "array",
