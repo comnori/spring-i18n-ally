@@ -84,20 +84,20 @@ export class TranslationWebview {
         const translations = data.translations;
 
         if (newKey !== this._key) {
-             // Rename case: Delete old key then write new key
-             // Check if new key exists?
-             // Ideally we should warn, but let's just proceed.
-             // Wait, if we delete old key first, we lose values if write fails?
-             // But we have values in 'translations'.
-             if (this._key) {
-                 await manager.deleteKey(this._key);
-             }
-             this._key = newKey;
-             this._panel.title = `Translating: ${this._key}`;
+            // Rename case: Delete old key then write new key
+            // Check if new key exists?
+            // Ideally we should warn, but let's just proceed.
+            // Wait, if we delete old key first, we lose values if write fails?
+            // But we have values in 'translations'.
+            if (this._key) {
+                await manager.deleteKey(this._key);
+            }
+            this._key = newKey;
+            this._panel.title = `Translating: ${this._key}`;
         }
 
         const promises = Object.keys(translations).map(locale =>
-             manager.writeTranslation(this._key, locale, translations[locale])
+            manager.writeTranslation(this._key, locale, translations[locale])
         );
         await Promise.all(promises);
         vscode.window.showInformationMessage(`Saved translations for ${this._key}`);
@@ -147,7 +147,16 @@ export class TranslationWebview {
 
         // Gather data
         const translations: any = {};
-        const availableLocales = new Set([...locales, ...Object.keys(manager.propertiesCache)]);
+        const availableLocales = new Set(locales);
+        // Always include 'default' if it exists (for messages.properties)
+        if (manager.propertiesCache['default']) {
+            availableLocales.add('default');
+        }
+
+        // If no locales are configured, fallback to showing all available
+        if (locales.length === 0) {
+            Object.keys(manager.propertiesCache).forEach(k => availableLocales.add(k));
+        }
 
         availableLocales.forEach(l => {
             translations[l] = manager.getTranslation(this._key, l) || '';
@@ -302,5 +311,5 @@ export class TranslationWebview {
                 </script>
             </body>
             </html>`;
-}
+    }
 }
